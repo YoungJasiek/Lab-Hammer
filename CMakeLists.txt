@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.22)
+cmake_minimum_required(VERSION 3.22)
 project(LabHammer LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -6,21 +6,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(LAB_ENGINE_DIR "$ENV{LAB_ENGINE_DIR}")
 if(NOT LAB_ENGINE_DIR)
-    set(LAB_ENGINE_DIR "C:\Users\jancz\Desktop\Lab")
+    set(LAB_ENGINE_DIR "C:/Users/jancz/Desktop/Lab")
 endif()
 
 include_directories(
     "${LAB_ENGINE_DIR}/include"
     "${LAB_ENGINE_DIR}/src/glad/include"
     "${LAB_ENGINE_DIR}/external/lua"
+    "${LAB_ENGINE_DIR}/build/_deps/glfw-src/include"
 )
 
 link_directories(
     "${LAB_ENGINE_DIR}/build/Release"
+    "${LAB_ENGINE_DIR}/build/_deps/glfw-build/src/Release"
     "${LAB_ENGINE_DIR}/bin"
 )
 
 add_executable(LabHammer src/editor_main.cpp)
+target_compile_definitions(LabHammer PRIVATE GLAD_API_CALL_EXPORT)
 
 target_link_libraries(LabHammer PRIVATE
     LabCore
@@ -34,6 +37,7 @@ target_link_libraries(LabHammer PRIVATE
     LabScript
     LabStudioCore
     glad
+    glfw3
 )
 
 if(MSVC)
@@ -51,3 +55,5 @@ add_custom_command(TARGET LabHammer POST_BUILD
         "${LAB_ENGINE_DIR}/build/Release"
         "$<TARGET_FILE_DIR:LabHammer>"
 )
+
+
