@@ -343,24 +343,20 @@ public:
         }
 
         // Handle Left-Click
-        if (Input::isMouseButtonPressed(0)) {
-            if (!_lmbPressed) {
-                handleMouseClick(mx, my, false);
-                _lmbPressed = true;
-            }
-        } else {
+        if (Input::isMouseButtonJustPressed(0) || (Input::isMouseButtonPressed(0) && !_lmbPressed)) {
+            handleMouseClick(mx, my, false);
+            _lmbPressed = true;
+        } else if (!Input::isMouseButtonPressed(0)) {
             _lmbPressed = false;
         }
 
         // Handle Right-Click (for Tool 3 Pipette sample)
-        if (Input::isMouseButtonPressed(1)) {
-            if (!_rmbPressed) {
-                if (_activeTool == 3) {
-                    handleMouseClick(mx, my, true);
-                }
-                _rmbPressed = true;
+        if (Input::isMouseButtonJustPressed(1) || (Input::isMouseButtonPressed(1) && !_rmbPressed)) {
+            if (_activeTool == 3) {
+                handleMouseClick(mx, my, true);
             }
-        } else {
+            _rmbPressed = true;
+        } else if (!Input::isMouseButtonPressed(1)) {
             _rmbPressed = false;
         }
 
@@ -2565,16 +2561,6 @@ public:
                     LabFont::drawText(menuX + menuW - 65.0f, iy + 4.0f, items[i].shortcut, 1.5f, textDim, LabFontType::System);
                 }
             }
-        }
-
-        // Draw crisp responsive UI mouse pointer (when RMB is not held for camera freelook)
-        if (!Input::isMouseButtonPressed(1)) {
-            float cx = _mouseScreenX;
-            float cy = _mouseScreenY;
-            Renderer::drawRect(cx, cy, 2.0f, 16.0f, Vec3(0.0f, 0.0f, 0.0f));
-            Renderer::drawRect(cx, cy, 14.0f, 2.0f, Vec3(0.0f, 0.0f, 0.0f));
-            Renderer::drawRect(cx + 1.0f, cy + 1.0f, 11.0f, 11.0f, Vec3(1.0f, 1.0f, 1.0f));
-            Renderer::drawRect(cx + 2.0f, cy + 2.0f, 8.0f, 8.0f, Vec3(0.2f, 0.2f, 0.2f));
         }
 
         Renderer::endUI();
