@@ -176,6 +176,7 @@ public:
         if (_consoleMessages.size() > 8) {
             _consoleMessages.erase(_consoleMessages.begin());
         }
+        LabLog::info("[LabHammer] " + msg);
     }
 
     void onFixedUpdate(float fixedDelta) override {
@@ -344,6 +345,7 @@ public:
 
         // Handle Left-Click
         if (Input::isMouseButtonJustPressed(0) || (Input::isMouseButtonPressed(0) && !_lmbPressed)) {
+            LabLog::info("[LabHammer] LMB Click at (" + std::to_string((int)mx) + ", " + std::to_string((int)my) + ")");
             handleMouseClick(mx, my, false);
             _lmbPressed = true;
         } else if (!Input::isMouseButtonPressed(0)) {
@@ -1478,10 +1480,10 @@ public:
 
         // 7. Left Tools Palette (x: 0..42, y: 58..878)
         if (mx >= 0.0f && mx <= 42.0f) {
-            float startY = 65.0f;
+            float startY = 68.0f;
             for (int i = 0; i < 8; ++i) {
                 float ty = startY + i * 36.0f;
-                if (my >= ty && my <= ty + 32.0f) {
+                if (my >= ty - 2.0f && my <= ty + 32.0f) {
                     _activeTool = i;
                     switch (i) {
                         case 0: logMessage("Tool 0: Selection / Pointer Tool"); break;
@@ -2051,11 +2053,23 @@ public:
         Renderer::drawRect(0, 0, w, 24.0f, winBg);
         Renderer::drawRect(0, 23.0f, w, 1.0f, winBorder);
 
-        LabFont::drawText(14.0f, 5.0f, "File", 1.8f, textDark, LabFontType::System);
-        LabFont::drawText(54.0f, 5.0f, "Edit", 1.8f, textDark, LabFontType::System);
-        LabFont::drawText(94.0f, 5.0f, "View", 1.8f, textDark, LabFontType::System);
-        LabFont::drawText(140.0f, 5.0f, "Tools", 1.8f, textDark, LabFontType::System);
-        LabFont::drawText(190.0f, 5.0f, "Help", 1.8f, textDark, LabFontType::System);
+        bool hovFile = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 10.0f && _mouseScreenX <= 50.0f);
+        bool hovEdit = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 52.0f && _mouseScreenX <= 90.0f);
+        bool hovView = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 92.0f && _mouseScreenX <= 135.0f);
+        bool hovTools = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 137.0f && _mouseScreenX <= 185.0f);
+        bool hovHelp = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 187.0f && _mouseScreenX <= 230.0f);
+
+        if (hovFile) Renderer::drawRect(10.0f, 2.0f, 40.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
+        if (hovEdit) Renderer::drawRect(52.0f, 2.0f, 38.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
+        if (hovView) Renderer::drawRect(92.0f, 2.0f, 43.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
+        if (hovTools) Renderer::drawRect(137.0f, 2.0f, 48.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
+        if (hovHelp) Renderer::drawRect(187.0f, 2.0f, 43.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
+
+        LabFont::drawText(14.0f, 5.0f, "File", 1.8f, hovFile ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
+        LabFont::drawText(54.0f, 5.0f, "Edit", 1.8f, hovEdit ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
+        LabFont::drawText(94.0f, 5.0f, "View", 1.8f, hovView ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
+        LabFont::drawText(140.0f, 5.0f, "Tools", 1.8f, hovTools ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
+        LabFont::drawText(190.0f, 5.0f, "Help", 1.8f, hovHelp ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
 
         LabFont::drawText(w - 360.0f, 5.0f, "Lab Hammer 4.1 - 3D Level Editor", 1.8f, Vec3(0.15f, 0.45f, 0.75f), LabFontType::GeoSans);
 
@@ -2080,11 +2094,12 @@ public:
         for (int i = 0; i < 8; ++i) {
             float ty = leftY + 10.0f + i * 36.0f;
             bool isSel = (_activeTool == i);
-            Vec3 bgCol = isSel ? Vec3(0.78f, 0.88f, 1.0f) : Vec3(0.88f, 0.88f, 0.90f);
-            Vec3 iconCol = isSel ? orangeGlow : Vec3(0.25f, 0.28f, 0.32f);
+            bool isHov = (_mouseScreenX >= 6.0f && _mouseScreenX <= 36.0f && _mouseScreenY >= ty && _mouseScreenY <= ty + 30.0f);
+            Vec3 bgCol = isSel ? Vec3(0.78f, 0.88f, 1.0f) : (isHov ? Vec3(0.92f, 0.95f, 1.0f) : Vec3(0.88f, 0.88f, 0.90f));
+            Vec3 iconCol = isSel ? orangeGlow : (isHov ? Vec3(0.15f, 0.45f, 0.85f) : Vec3(0.25f, 0.28f, 0.32f));
 
             Renderer::drawRect(6.0f, ty, 30.0f, 30.0f, bgCol);
-            Renderer::drawRect(6.0f, ty, 30.0f, 1.0f, isSel ? cyanGlow : winBorder);
+            Renderer::drawRect(6.0f, ty, 30.0f, 1.0f, isSel ? cyanGlow : (isHov ? cyanGlow : winBorder));
             drawHammerIcon(i, 9.0f, ty + 3.0f, iconCol, bgCol);
         }
 
