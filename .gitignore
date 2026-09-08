@@ -1,0 +1,10 @@
+﻿build/
+bin/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.exp
+.vs/
+.cache/
+*.log

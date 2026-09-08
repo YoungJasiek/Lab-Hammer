@@ -1,0 +1,50 @@
+LABMAP_VERSION 1
+
+METADATA
+    name "Research Complex Alpha"
+    ambient 0.22 0.26 0.35
+    sun_dir -0.4 -0.8 -0.4
+    sun_color 0.95 0.98 1.0
+END_METADATA
+
+ENTITIES
+    spawn 0.0 1.8 0.0 0.0
+
+    // Spawn Points (FFA Neutral & TDM Team Alpha/Beta Bases)
+    spawn_point info_player_deathmatch 0.0 1.8 0.0 0.0 ffa
+    spawn_point info_player_deathmatch 0.0 1.8 -16.0 180.0 ffa
+    spawn_point info_player_team1 -12.0 1.8 6.0 45.0 team_alpha
+    spawn_point info_player_team1 -10.0 1.8 10.0 0.0 team_alpha
+    spawn_point info_player_team2 12.0 1.8 -6.0 -135.0 team_beta
+    spawn_point info_player_team2 10.0 1.8 -10.0 180.0 team_beta
+
+    // Persistent Weapon Spawn Pads (60s Respawn Timer)
+    weapon_spawner 0 -5.0 0.0 0.0 0.0 60.0
+    weapon_spawner 1  5.0 0.0 0.0 0.0 60.0
+    weapon_spawner 2  0.0 0.0 -8.0 0.0 60.0
+    weapon_spawner 3 -8.0 0.0 -12.0 45.0 60.0
+    weapon_spawner 4  8.0 0.0 -12.0 -45.0 60.0
+    weapon_spawner 5  0.0 0.0 8.0 180.0 60.0
+    weapon_spawner 6 -10.0 0.0 2.0 90.0 60.0
+    weapon_spawner 7  10.0 0.0 2.0 -90.0 60.0
+    weapon_spawner 8  0.0 0.0 -16.0 0.0 60.0
+
+    // Floor Baseplate
+    brush cube 0.0 -0.5 0.0 160.0 1.0 160.0 1.0 1.0 1.0 floor_tiles.bmp
+
+    // Central Facility Model
+    prop Model.stl 0.0 1.5 -6.0 0.0 0.0 0.0 1.5 1.5 1.5 0.9 0.9 0.9 metal_hull.bmp
+
+    // Interactive Hydraulic Security Door (opens when player approaches closer than 5 units)
+    door security_gate_a 0.0 1.75 -12.0 4.0 3.5 0.4 0.0 4.0 0.0 0.25 0.35 0.45 2.5 5.5
+
+    // Perimeter Cryo-Pillars
+    brush cube -15.0 5.0 -10.0 2.0 10.0 2.0 0.5 0.7 0.95 cryo_ice.bmp
+    brush cube  15.0 5.0 -10.0 2.0 10.0 2.0 0.5 0.7 0.95 cryo_ice.bmp
+    brush cube -15.0 5.0  10.0 2.0 10.0 2.0 0.5 0.7 0.95 cryo_ice.bmp
+    brush cube  15.0 5.0  10.0 2.0 10.0 2.0 0.5 0.7 0.95 cryo_ice.bmp
+
+    // North Concrete Wall with Hazard Stripes
+    brush cube 0.0 4.0 -20.0 24.0 8.0 1.0 1.0 1.0 1.0 concrete_wall.bmp
+    brush cube 0.0 0.5 -19.4 24.0 1.0 0.2 1.0 1.0 1.0 hazard_stripes.bmp
+END_ENTITIES
