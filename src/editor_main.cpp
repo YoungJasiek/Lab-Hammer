@@ -62,7 +62,7 @@ public:
         _camera.setPosition(Vec3(0, 8.0f, 18.0f));
 
         // Unlock mouse cursor for UI desktop interaction
-        glfwSetInputMode(getWindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        setCursorCaptured(false);
 
         logMessage("Hammer initialized. Ready.");
         logMessage("Textures loaded: " + std::to_string(_availableTextures.size()) + " | Models: " + std::to_string(_availableModels.size()));
@@ -298,13 +298,17 @@ public:
         (void)time;
 
         // Compute coordinate scaling between screen window coordinates and framebuffer
-        int winW = 0, winH = 0;
-        glfwGetWindowSize(getWindow(), &winW, &winH);
-        int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        int winW = 1600, winH = 900;
+        getWindowSize(winW, winH);
+        int fbW = 1600, fbH = 900;
+        getFramebufferSize(fbW, fbH);
 
         double curX = 0.0, curY = 0.0;
-        glfwGetCursorPos(getWindow(), &curX, &curY);
+        getCursorPos(curX, curY);
+        if (curX == 0.0 && curY == 0.0) {
+            curX = (double)Input::getMouseX();
+            curY = (double)Input::getMouseY();
+        }
 
         float mouseScaleX = (winW > 0 && fbW > 0) ? ((float)fbW / (float)winW) : 1.0f;
         float mouseScaleY = (winH > 0 && fbH > 0) ? ((float)fbH / (float)winH) : 1.0f;
@@ -578,7 +582,7 @@ public:
     void pickObjectInViewport(float mx, float my, bool isRmb = false) {
         if (!_map) return;
         int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        getFramebufferSize(fbW, fbH);
         float w = (fbW > 0) ? (float)fbW : (float)getWidth();
         float h = (fbH > 0) ? (float)fbH : (float)getHeight();
 
@@ -1306,7 +1310,7 @@ public:
 
     void handleMouseClick(float mx, float my, bool isRmb = false) {
         int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        getFramebufferSize(fbW, fbH);
         float w = (fbW > 0) ? (float)fbW : (float)getWidth();
         float h = (fbH > 0) ? (float)fbH : (float)getHeight();
 
@@ -1407,7 +1411,7 @@ public:
                 else if (itemIdx == 1) openMapDialog();
                 else if (itemIdx == 2) saveMapAction(false);
                 else if (itemIdx == 3) saveMapAction(true);
-                else if (itemIdx >= 4) glfwSetWindowShouldClose(getWindow(), GLFW_TRUE);
+                else if (itemIdx >= 4) stop();
                 _fileMenuOpen = false;
                 return;
             } else {
@@ -2036,7 +2040,7 @@ public:
 
     void drawHammerInterface() {
         int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        getFramebufferSize(fbW, fbH);
         float w = (fbW > 0) ? (float)fbW : (float)getWidth();
         float h = (fbH > 0) ? (float)fbH : (float)getHeight();
 
@@ -2584,7 +2588,7 @@ public:
     // Modal Texture Browser Gallery
     void drawTextureBrowser() {
         int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        getFramebufferSize(fbW, fbH);
         float w = (fbW > 0) ? (float)fbW : (float)getWidth();
         float h = (fbH > 0) ? (float)fbH : (float)getHeight();
 
@@ -2636,7 +2640,7 @@ public:
     // Modal Model Browser Gallery
     void drawModelBrowser() {
         int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        getFramebufferSize(fbW, fbH);
         float w = (fbW > 0) ? (float)fbW : (float)getWidth();
         float h = (fbH > 0) ? (float)fbH : (float)getHeight();
 
@@ -2681,7 +2685,7 @@ public:
     // Modal Help
     void drawHelpModal() {
         int fbW = 0, fbH = 0;
-        glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
+        getFramebufferSize(fbW, fbH);
         float w = (fbW > 0) ? (float)fbW : (float)getWidth();
         float h = (fbH > 0) ? (float)fbH : (float)getHeight();
 
