@@ -54,9 +54,28 @@ add_custom_command(TARGET LabHammer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/fonts"
         "$<TARGET_FILE_DIR:LabHammer>/fonts"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${LAB_ENGINE_DIR}/build/Release"
-        "$<TARGET_FILE_DIR:LabHammer>"
 )
+
+set(ENGINE_DLLS
+    glad.dll
+    LabCore.dll
+    LabRender.dll
+    LabAudio.dll
+    LabPhysics.dll
+    LabAnimation.dll
+    LabWorld.dll
+    LabNetwork.dll
+    LabAI.dll
+    LabScript.dll
+    LabStudioCore.dll
+)
+
+foreach(dll ${ENGINE_DLLS})
+    add_custom_command(TARGET LabHammer POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${LAB_ENGINE_DIR}/build/Release/${dll}"
+            "$<TARGET_FILE_DIR:LabHammer>/${dll}"
+    )
+endforeach()
 
 

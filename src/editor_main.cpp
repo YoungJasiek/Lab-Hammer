@@ -259,15 +259,15 @@ public:
         si.cb = sizeof(si);
         ZeroMemory(&pi, sizeof(pi));
 
-        char cmdLine[256] = "Lab.exe";
-        if (CreateProcessA("Lab.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) ||
-            CreateProcessA("Release\\Lab.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        char cmdLine[256] = "FrozenLife.exe";
+        if (CreateProcessA("FrozenLife.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) ||
+            CreateProcessA("Release\\FrozenLife.exe", cmdLine, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
-            logMessage("Launched Lab.exe in Game Engine!");
+            logMessage("Launched FrozenLife.exe in Game Engine!");
         } else {
-            system("start Lab.exe");
-            logMessage("Launched Lab.exe via shell!");
+            system("start FrozenLife.exe");
+            logMessage("Launched FrozenLife.exe via shell!");
         }
     }
 
@@ -296,25 +296,51 @@ public:
     void onUpdate(const Time& time) override {
         (void)time;
 
-        // Mouse look in 3D Viewport when holding Right Mouse Button
-        if (Input::isMouseButtonPressed(1)) {
-            _camera.update(Input::mouseDelta);
-        }
-
-        // Snap 3D cursor to grid
-        _cursorPos = snapToGrid(_camera.getPosition() + _camera.getFront() * 10.0f, _gridSnap);
-
         // Compute coordinate scaling between screen window coordinates and framebuffer
         int winW = 0, winH = 0;
         glfwGetWindowSize(getWindow(), &winW, &winH);
         int fbW = 0, fbH = 0;
         glfwGetFramebufferSize(getWindow(), &fbW, &fbH);
 
+        double curX = 0.0, curY = 0.0;
+        glfwGetCursorPos(getWindow(), &curX, &curY);
+
         float mouseScaleX = (winW > 0 && fbW > 0) ? ((float)fbW / (float)winW) : 1.0f;
         float mouseScaleY = (winH > 0 && fbH > 0) ? ((float)fbH / (float)winH) : 1.0f;
 
-        float mx = Input::mousePos.x * mouseScaleX;
-        float my = Input::mousePos.y * mouseScaleY;
+        float mx = (float)curX * mouseScaleX;
+        float my = (float)curY * mouseScaleY;
+        _mouseScreenX = mx;
+        _mouseScreenY = my;
+
+        // Mouse look in 3D Viewport when holding Right Mouse Button
+        if (Input::isMouseButtonPressed(1)) {
+            _camera.update(Input::mouseDelta);
+        }
+
+        // Raycast mouse cursor onto floor or scene when hovering 3D viewport so 3D cursor follows the mouse!
+        float vpX = 42.0f;
+        float vpY = 58.0f;
+        float vpW = (float)fbW - vpX - 320.0f;
+        float vpH = (float)fbH - vpY - 26.0f;
+        bool in3DViewport = (mx >= vpX && mx <= vpX + vpW && my >= vpY && my <= vpY + vpH);
+
+        if (in3DViewport && !Input::isMouseButtonPressed(1)) {
+            Vec3 rayDir = _camera.screenToWorldRay(mx, my, (float)fbW, (float)fbH);
+            if (std::abs(rayDir.y) > 0.0001f) {
+                float t = -_camera.getPosition().y / rayDir.y;
+                if (t > 0.0f && t < 200.0f) {
+                    Vec3 hit = _camera.getPosition() + rayDir * t;
+                    _cursorPos = snapToGrid(hit, _gridSnap);
+                } else {
+                    _cursorPos = snapToGrid(_camera.getPosition() + _camera.getFront() * 10.0f, _gridSnap);
+                }
+            } else {
+                _cursorPos = snapToGrid(_camera.getPosition() + _camera.getFront() * 10.0f, _gridSnap);
+            }
+        } else if (Input::isMouseButtonPressed(1)) {
+            _cursorPos = snapToGrid(_camera.getPosition() + _camera.getFront() * 10.0f, _gridSnap);
+        }
 
         // Handle Left-Click
         if (Input::isMouseButtonPressed(0)) {
@@ -2541,6 +2567,16 @@ public:
             }
         }
 
+        // Draw crisp responsive UI mouse pointer (when RMB is not held for camera freelook)
+        if (!Input::isMouseButtonPressed(1)) {
+            float cx = _mouseScreenX;
+            float cy = _mouseScreenY;
+            Renderer::drawRect(cx, cy, 2.0f, 16.0f, Vec3(0.0f, 0.0f, 0.0f));
+            Renderer::drawRect(cx, cy, 14.0f, 2.0f, Vec3(0.0f, 0.0f, 0.0f));
+            Renderer::drawRect(cx + 1.0f, cy + 1.0f, 11.0f, 11.0f, Vec3(1.0f, 1.0f, 1.0f));
+            Renderer::drawRect(cx + 2.0f, cy + 2.0f, 8.0f, 8.0f, Vec3(0.2f, 0.2f, 0.2f));
+        }
+
         Renderer::endUI();
     }
 
@@ -2756,6 +2792,8 @@ private:
     bool _arrowDownPressed = false;
     bool _pageUpPressed = false;
     bool _pageDownPressed = false;
+    float _mouseScreenX = 0.0f;
+    float _mouseScreenY = 0.0f;
 };
 
 int main() {
