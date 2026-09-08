@@ -38,7 +38,7 @@ public:
     }
 
     void onInit() override {
-        LabLog::info("Launching Full Valve Hammer UI Editor...");
+        LabLog::info("Launching Lab Hammer 3D Level Editor...");
         Renderer::init();
 
         // Scan textures and models
@@ -1981,7 +1981,7 @@ public:
             drawClipToolOverlay();
         }
 
-        // 2. Render 2D Valve Hammer Desktop Interface
+        // 2. Render 2D Lab Hammer Desktop Interface
         drawHammerInterface();
 
         // 3. Render Modal Texture Browser if open
@@ -2035,7 +2035,7 @@ public:
         LabFont::drawText(140.0f, 5.0f, "Tools", 1.8f, textDark, LabFontType::System);
         LabFont::drawText(190.0f, 5.0f, "Help", 1.8f, textDark, LabFontType::System);
 
-        LabFont::drawText(w - 360.0f, 5.0f, "Valve Hammer 4.1 - Frozen-Life Engine", 1.8f, Vec3(0.15f, 0.45f, 0.75f), LabFontType::GeoSans);
+        LabFont::drawText(w - 360.0f, 5.0f, "Lab Hammer 4.1 - 3D Level Editor", 1.8f, Vec3(0.15f, 0.45f, 0.75f), LabFontType::GeoSans);
 
         // ==================== 2. MAIN TOOLBAR (18 Buttons) ====================
         float tbY = 24.0f;
