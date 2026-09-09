@@ -381,6 +381,12 @@ public:
             _cursorPos = snapToGrid(_camera.getPosition() + _camera.getFront() * 10.0f, _gridSnap);
         }
 
+        // Mouse Wheel: Elevate / Lower selected object along Y-axis if inside 3D Viewport
+        if (std::abs(Input::scrollDelta) > 0.01f && _selectionType != SelectionType::None && in3DViewport && !Input::isMouseButtonPressed(1)) {
+            float dy = (Input::scrollDelta > 0.0f) ? _gridSnap : -_gridSnap;
+            moveSelection(0.0f, dy, 0.0f);
+        }
+
         // Handle Left-Click
         if (Input::isMouseButtonJustPressed(0) || (Input::isMouseButtonPressed(0) && !_lmbPressed)) {
             LabLog::info("[LabHammer] LMB Click at (" + std::to_string((int)mx) + ", " + std::to_string((int)my) + ")");
@@ -549,11 +555,14 @@ public:
                 }
             } else _arrowDownPressed = false;
 
-            if (Input::isKeyPressed(266)) { // PageUp
+            bool upElevateKey = Input::isKeyPressed(266) || Input::isKeyPressed(82) || Input::isKeyPressed(334) || Input::isKeyPressed(93); // PageUp, 'R', Keypad '+', ']'
+            bool dwnElevateKey = Input::isKeyPressed(267) || Input::isKeyPressed(67) || Input::isKeyPressed(333) || Input::isKeyPressed(91); // PageDown, 'C', Keypad '-', '['
+
+            if (upElevateKey) {
                 if (!_pageUpPressed) { moveSelection(0, _gridSnap, 0); _pageUpPressed = true; }
             } else _pageUpPressed = false;
 
-            if (Input::isKeyPressed(267)) { // PageDown
+            if (dwnElevateKey) {
                 if (!_pageDownPressed) { moveSelection(0, -_gridSnap, 0); _pageDownPressed = true; }
             } else _pageDownPressed = false;
         }
@@ -637,6 +646,20 @@ public:
         float closestT = 1e9f;
         SelectionType hitType = SelectionType::None;
         int hitIndex = -1;
+
+        // Interactive Gizmo Y-Handle Hit Test (Elevate selected object by clicking the vertical green arrow)
+        if (_selectionType != SelectionType::None && !isRmb) {
+            Vec3 selPos = getSelectedPosition();
+            Vec3 yHandleMin = selPos + Vec3(-0.35f, 0.2f, -0.35f);
+            Vec3 yHandleMax = selPos + Vec3(0.35f, 2.3f, 0.35f);
+            float tGizmo = 0.0f;
+            if (rayIntersectAABB(rayOrigin, rayDir, yHandleMin, yHandleMax, tGizmo)) {
+                if (tGizmo > 0.01f && tGizmo < 300.0f) {
+                    moveSelection(0.0f, _gridSnap, 0.0f);
+                    return;
+                }
+            }
+        }
 
         // Test Brushes
         for (size_t i = 0; i < _map->brushes.size(); ++i) {
@@ -781,19 +804,53 @@ public:
         }
     }
 
+    Vec3 getSelectedPosition() const {
+        if (!_map) return Vec3(0, 0, 0);
+        if (_selectionType == SelectionType::Brush && _selectedIndex >= 0 && _selectedIndex < (int)_map->brushes.size()) {
+            return _map->brushes[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::Prop && _selectedIndex >= 0 && _selectedIndex < (int)_map->props.size()) {
+            return _map->props[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::Door && _selectedIndex >= 0 && _selectedIndex < (int)_map->doors.size()) {
+            return _map->doors[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::Spawn && _selectedIndex >= 0 && _selectedIndex < (int)_map->spawnPoints.size()) {
+            return _map->spawnPoints[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::WeaponSpawner && _selectedIndex >= 0 && _selectedIndex < (int)_map->weaponSpawners.size()) {
+            return _map->weaponSpawners[_selectedIndex].position;
+        }
+        return Vec3(0, 0, 0);
+    }
+
+    void alignSelectionToGround() {
+        if (!_map || _selectionType == SelectionType::None) return;
+        Vec3 curPos = getSelectedPosition();
+        moveSelection(0.0f, -curPos.y, 0.0f);
+        logMessage("Snapped selection to Ground (Y=0.0)");
+    }
+
     void moveSelection(float dx, float dy, float dz) {
         if (!_map) return;
+        Vec3 newPos(0, 0, 0);
         if (_selectionType == SelectionType::Brush && _selectedIndex >= 0 && _selectedIndex < (int)_map->brushes.size()) {
             _map->brushes[_selectedIndex].position += Vec3(dx, dy, dz);
+            newPos = _map->brushes[_selectedIndex].position;
         } else if (_selectionType == SelectionType::Prop && _selectedIndex >= 0 && _selectedIndex < (int)_map->props.size()) {
             _map->props[_selectedIndex].position += Vec3(dx, dy, dz);
+            newPos = _map->props[_selectedIndex].position;
         } else if (_selectionType == SelectionType::Door && _selectedIndex >= 0 && _selectedIndex < (int)_map->doors.size()) {
             _map->doors[_selectedIndex].position += Vec3(dx, dy, dz);
+            newPos = _map->doors[_selectedIndex].position;
         } else if (_selectionType == SelectionType::Spawn && _selectedIndex >= 0 && _selectedIndex < (int)_map->spawnPoints.size()) {
             _map->spawnPoints[_selectedIndex].position += Vec3(dx, dy, dz);
             _map->spawn.position = _map->spawnPoints[0].position;
+            newPos = _map->spawnPoints[_selectedIndex].position;
         } else if (_selectionType == SelectionType::WeaponSpawner && _selectedIndex >= 0 && _selectedIndex < (int)_map->weaponSpawners.size()) {
             _map->weaponSpawners[_selectedIndex].position += Vec3(dx, dy, dz);
+            newPos = _map->weaponSpawners[_selectedIndex].position;
+        }
+        if (std::abs(dy) > 0.0001f) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Elevated selection: Y = %.2f (offset %+0.2f)", newPos.y, dy);
+            logMessage(buf);
         }
     }
 
@@ -1850,6 +1907,35 @@ public:
                     return;
                 }
 
+                // Position translation buttons [-] [+] (Move X / Y / Z on grid)
+                if (my >= l.posBtnsY && my <= l.posBtnsY + l.posBtnH) {
+                    // X - / +
+                    if (mx >= l.rightX + 30.0f && mx <= l.rightX + 56.0f) { moveSelection(-_gridSnap, 0, 0); return; }
+                    if (mx >= l.rightX + 60.0f && mx <= l.rightX + 86.0f) { moveSelection(_gridSnap, 0, 0); return; }
+                    // Y - / +
+                    if (mx >= l.rightX + 123.0f && mx <= l.rightX + 149.0f) { moveSelection(0, -_gridSnap, 0); return; }
+                    if (mx >= l.rightX + 153.0f && mx <= l.rightX + 179.0f) { moveSelection(0, _gridSnap, 0); return; }
+                    // Z - / +
+                    if (mx >= l.rightX + 216.0f && mx <= l.rightX + 242.0f) { moveSelection(0, 0, -_gridSnap); return; }
+                    if (mx >= l.rightX + 246.0f && mx <= l.rightX + 272.0f) { moveSelection(0, 0, _gridSnap); return; }
+                }
+
+                // Dedicated Quick Elevation Buttons [ ^ UP (+Y) ] [ v DOWN (-Y) ] [ Floor (Y=0) ]
+                if (my >= l.elevUpY && my <= l.elevUpY + l.elevUpH) {
+                    if (mx >= l.elevUpX && mx <= l.elevUpX + l.elevUpW) {
+                        moveSelection(0, _gridSnap, 0);
+                        return;
+                    }
+                    if (mx >= l.elevDwnX && mx <= l.elevDwnX + l.elevDwnW) {
+                        moveSelection(0, -_gridSnap, 0);
+                        return;
+                    }
+                    if (mx >= l.elevGndX && mx <= l.elevGndX + l.elevGndW) {
+                        alignSelectionToGround();
+                        return;
+                    }
+                }
+
                 // Dimension adjusters [-] [+]
                 if (my >= l.dimBtnsY && my <= l.dimBtnsY + l.dimBtnH) {
                     // X - / +
@@ -1885,14 +1971,18 @@ public:
     }
 
     void drawGizmo(const Vec3& pos) {
-        float len = 1.6f;
-        float thick = 0.06f;
+        float len = 1.8f;
+        float thick = 0.08f;
+        float cap = 0.22f;
         // X Axis: Red
-        Renderer::drawCube(pos + Vec3(len * 0.5f, 0, 0), Vec3(len, thick, thick), Vec3(1.0f, 0.15f, 0.15f), false);
-        // Y Axis: Green
-        Renderer::drawCube(pos + Vec3(0, len * 0.5f, 0), Vec3(thick, len, thick), Vec3(0.15f, 1.0f, 0.2f), false);
+        Renderer::drawCube(pos + Vec3(len * 0.5f, 0, 0), Vec3(len, thick, thick), Vec3(1.0f, 0.18f, 0.18f), false);
+        Renderer::drawCube(pos + Vec3(len, 0, 0), Vec3(cap, cap, cap), Vec3(1.0f, 0.35f, 0.35f), false);
+        // Y Axis: Green (vertical elevation handle - glowing green top cap arrow)
+        Renderer::drawCube(pos + Vec3(0, len * 0.5f, 0), Vec3(thick, len, thick), Vec3(0.2f, 1.0f, 0.25f), false);
+        Renderer::drawCube(pos + Vec3(0, len, 0), Vec3(cap * 1.3f, cap * 1.5f, cap * 1.3f), Vec3(0.35f, 1.0f, 0.45f), false);
         // Z Axis: Blue
-        Renderer::drawCube(pos + Vec3(0, 0, len * 0.5f), Vec3(thick, thick, len), Vec3(0.2f, 0.55f, 1.0f), false);
+        Renderer::drawCube(pos + Vec3(0, 0, len * 0.5f), Vec3(thick, thick, len), Vec3(0.25f, 0.55f, 1.0f), false);
+        Renderer::drawCube(pos + Vec3(0, 0, len), Vec3(cap, cap, cap), Vec3(0.45f, 0.7f, 1.0f), false);
     }
 
     void onRender() override {
@@ -2541,6 +2631,29 @@ public:
 
             drawDarkButton(l.modelBrowseX, l.modelBrowseY, l.modelBrowseW, l.modelBrowseH, "Browse 3D Models...");
 
+            // Position Translation [-] [+]
+            LabFont::drawText(l.rightX + 12.0f, l.posBtnsY - 18.0f, "Move Position (X / Y / Z):", 1.7f, cyanGlow, LabFontType::System);
+
+            // X Position
+            LabFont::drawText(l.rightX + 12.0f, l.posBtnsY + 4.0f, "X:", 1.6f, textLight, LabFontType::System);
+            drawDarkButton(l.rightX + 30.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "-");
+            drawDarkButton(l.rightX + 60.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "+");
+
+            // Y Position (Vertical Elevation)
+            LabFont::drawText(l.rightX + 105.0f, l.posBtnsY + 4.0f, "Y:", 1.6f, greenAccent, LabFontType::System);
+            drawDarkButton(l.rightX + 123.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "-");
+            drawDarkButton(l.rightX + 153.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "+");
+
+            // Z Position
+            LabFont::drawText(l.rightX + 198.0f, l.posBtnsY + 4.0f, "Z:", 1.6f, textLight, LabFontType::System);
+            drawDarkButton(l.rightX + 216.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "-");
+            drawDarkButton(l.rightX + 246.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "+");
+
+            // Quick Elevation Action Buttons
+            drawDarkButton(l.elevUpX, l.elevUpY, l.elevUpW, l.elevUpH, "^ UP (+Y)", false, false, true);
+            drawDarkButton(l.elevDwnX, l.elevDwnY, l.elevDwnW, l.elevDwnH, "v DOWN (-Y)");
+            drawDarkButton(l.elevGndX, l.elevGndY, l.elevGndW, l.elevGndH, "Floor (Y=0)");
+
             // Dimension Adjusters [-] [+]
             LabFont::drawText(l.rightX + 12.0f, l.dimBtnsY - 18.0f, "Adjust Size (X / Y / Z):", 1.7f, textLight, LabFontType::System);
 
@@ -2606,7 +2719,7 @@ public:
         Renderer::drawRect(0, sbY, w, 22.0f, panelDarker);
         drawDarkBevel(0, sbY, w, 22.0f, false);
 
-        std::string sbText = "RMB Fly | LMB Pick/Apply | E Place | X Clip | ENTER Commit | F Focus | Ctrl+D Duplicate | Del Delete | " + _cullingStats;
+        std::string sbText = "RMB Fly | LMB Pick/Apply | Wheel / R / C: Elevate Y | E Place | X Clip | ENTER Commit | F Focus | " + _cullingStats;
         LabFont::drawText(10.0f, sbY + 5.0f, sbText, 1.5f, textLight, LabFontType::System);
         std::string gridStr = "Snap: " + std::to_string((int)_gridSnap) + " | F9: Run";
         LabFont::drawText(w - 240.0f, sbY + 5.0f, gridStr, 1.5f, orangeGlow, LabFontType::System);
