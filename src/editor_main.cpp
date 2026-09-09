@@ -27,7 +27,8 @@ enum class SelectionType {
     Prop,
     Door,
     Spawn,
-    WeaponSpawner
+    WeaponSpawner,
+    Light
 };
 
 class LabHammerStandalone : public Engine {
@@ -730,6 +731,20 @@ public:
             }
         }
 
+        // Test Lights
+        for (size_t i = 0; i < _map->lights.size(); ++i) {
+            const auto& lt = _map->lights[i];
+            Vec3 half(0.6f, 0.7f, 0.6f);
+            float t = 0;
+            if (rayIntersectAABB(rayOrigin, rayDir, lt.position - half, lt.position + half, t)) {
+                if (t < closestT) {
+                    closestT = t;
+                    hitType = SelectionType::Light;
+                    hitIndex = (int)i;
+                }
+            }
+        }
+
         // Tool 3: Texture pipette & application
         if (_activeTool == 3) {
             if (hitType == SelectionType::Brush) {
@@ -785,12 +800,14 @@ public:
                 logMessage("Selected " + _map->spawnPoints[hitIndex].getDisplayName() + " #" + std::to_string(hitIndex));
             } else if (_selectionType == SelectionType::WeaponSpawner) {
                 logMessage("Selected Weapon Spawner [" + _map->weaponSpawners[hitIndex].getWeaponName() + "] #" + std::to_string(hitIndex));
+            } else if (_selectionType == SelectionType::Light) {
+                logMessage("Selected Lamp Light #" + std::to_string(hitIndex) + " (" + _map->lights[hitIndex].name + ")");
             } else {
                 _selectionType = SelectionType::None;
                 _selectedIndex = -1;
                 logMessage("Deselected all");
             }
-        } else if (_activeTool == 1 || _activeTool == 2 || _activeTool == 4 || _activeTool == 5) {
+        } else if (_activeTool == 1 || _activeTool == 2 || _activeTool == 4 || _activeTool == 5 || _activeTool == 7) {
             if (!isRmb) {
                 if (Input::isKeyPressed(340) && hitType != SelectionType::None) {
                     // Shift + Click selects existing entity even while placement tool is active
@@ -816,6 +833,8 @@ public:
             return _map->spawnPoints[_selectedIndex].position;
         } else if (_selectionType == SelectionType::WeaponSpawner && _selectedIndex >= 0 && _selectedIndex < (int)_map->weaponSpawners.size()) {
             return _map->weaponSpawners[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+            return _map->lights[_selectedIndex].position;
         }
         return Vec3(0, 0, 0);
     }
@@ -846,6 +865,9 @@ public:
         } else if (_selectionType == SelectionType::WeaponSpawner && _selectedIndex >= 0 && _selectedIndex < (int)_map->weaponSpawners.size()) {
             _map->weaponSpawners[_selectedIndex].position += Vec3(dx, dy, dz);
             newPos = _map->weaponSpawners[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+            _map->lights[_selectedIndex].position += Vec3(dx, dy, dz);
+            newPos = _map->lights[_selectedIndex].position;
         }
         if (std::abs(dy) > 0.0001f) {
             char buf[64];
@@ -870,6 +892,12 @@ public:
             p.scale.z = std::max(0.2f, p.scale.z + dd);
             logMessage("Rescaled Prop #" + std::to_string(_selectedIndex) + " to (" + 
                        std::to_string((int)p.scale.x) + "x" + std::to_string((int)p.scale.y) + "x" + std::to_string((int)p.scale.z) + ")");
+        } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+            auto& lt = _map->lights[_selectedIndex];
+            lt.radius = std::max(2.0f, lt.radius + dw);
+            lt.intensity = std::max(0.2f, lt.intensity + dh * 0.5f);
+            logMessage("Adjusted Light #" + std::to_string(_selectedIndex) + " (Intensity: " + 
+                       std::to_string(lt.intensity) + ", Radius: " + std::to_string((int)lt.radius) + "m)");
         }
     }
 
@@ -910,6 +938,14 @@ public:
             _map->weaponSpawners.push_back(ws);
             _selectedIndex = (int)_map->weaponSpawners.size() - 1;
             logMessage("Duplicated Weapon Spawner [" + ws.getWeaponName() + "] to #" + std::to_string(_selectedIndex));
+        } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+            MapLight lt = _map->lights[_selectedIndex];
+            lt.position.x += _gridSnap;
+            lt.position.z += _gridSnap;
+            lt.name = "light_" + std::to_string(_map->lights.size());
+            _map->lights.push_back(lt);
+            _selectedIndex = (int)_map->lights.size() - 1;
+            logMessage("Duplicated Lamp Light to #" + std::to_string(_selectedIndex));
         }
     }
 
@@ -944,6 +980,11 @@ public:
             logMessage("Deleted Weapon Spawner #" + std::to_string(_selectedIndex));
             _selectionType = SelectionType::None;
             _selectedIndex = -1;
+        } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+            _map->lights.erase(_map->lights.begin() + _selectedIndex);
+            logMessage("Deleted Lamp Light #" + std::to_string(_selectedIndex));
+            _selectionType = SelectionType::None;
+            _selectedIndex = -1;
         }
     }
 
@@ -959,6 +1000,8 @@ public:
             targetPos = _map->spawnPoints[_selectedIndex].position;
         } else if (_selectionType == SelectionType::WeaponSpawner && _selectedIndex >= 0 && _selectedIndex < (int)_map->weaponSpawners.size()) {
             targetPos = _map->weaponSpawners[_selectedIndex].position;
+        } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+            targetPos = _map->lights[_selectedIndex].position;
         }
         _camera.setPosition(targetPos - _camera.getFront() * 10.0f);
         logMessage("Focused Camera on selection at (" + std::to_string((int)targetPos.x) + ", " + std::to_string((int)targetPos.y) + ", " + std::to_string((int)targetPos.z) + ")");
@@ -1409,6 +1452,18 @@ public:
             _selectionType = SelectionType::Spawn;
             _selectedIndex = (int)_map->spawnPoints.size() - 1;
             logMessage("Placed " + sp.getDisplayName() + " #" + std::to_string(_selectedIndex) + " at (" + std::to_string((int)_cursorPos.x) + ", " + std::to_string((int)_cursorPos.z) + ")");
+        } else if (_activeTool == 7) { // Lamp / Light Tool
+            MapLight lt;
+            lt.name = "light_" + std::to_string(_map->lights.size());
+            lt.position = _cursorPos + Vec3(0.0f, 1.5f, 0.0f);
+            lt.color = _lampColor;
+            lt.intensity = _lampIntensity;
+            lt.radius = _lampRadius;
+            lt.type = _lampType;
+            _map->lights.push_back(lt);
+            _selectionType = SelectionType::Light;
+            _selectedIndex = (int)_map->lights.size() - 1;
+            logMessage("Placed Lamp Light #" + std::to_string(_selectedIndex) + " (Intensity: " + std::to_string(lt.intensity) + ", Radius: " + std::to_string((int)lt.radius) + "m)");
         }
     }
 
@@ -1622,14 +1677,9 @@ public:
                                 else logMessage("CSG Clip Mode: Keep Both (Split into 2 Brushes)");
                             }
                             break;
-                        case 7: // Lighting tool
-                            _sunAngle += 30.0f;
-                            if (_sunAngle >= 360.0f) _sunAngle = 0.0f;
-                            {
-                                float rad = _sunAngle * 3.14159f / 180.0f;
-                                Renderer::setSunLight(Vec3(std::cos(rad), -0.8f, std::sin(rad)), Vec3(1.0f, 0.95f, 0.9f), Vec3(0.25f, 0.28f, 0.35f));
-                            }
-                            logMessage("Tool 7: Adjusted Sun Light Angle (" + std::to_string((int)_sunAngle) + " deg)");
+                        case 7: // Lamp / Light Tool
+                            _activeTool = 7;
+                            logMessage("Tool 7: Lamp / Light Tool (E to place light source, Left-click on scene to place)");
                             break;
                     }
                     return;
@@ -1694,7 +1744,7 @@ public:
             if (_sidebarTab == SidebarTab::Hierarchy) {
                 int totalSpawns = (int)_map->spawnPoints.size();
                 int totalWepSpawns = (int)_map->weaponSpawners.size();
-                int totalEntities = (int)(totalSpawns + totalWepSpawns + _map->brushes.size() + _map->props.size() + _map->doors.size());
+                int totalEntities = (int)(totalSpawns + totalWepSpawns + _map->brushes.size() + _map->props.size() + _map->doors.size() + _map->lights.size());
                 int maxItems = (int)(l.outListH / l.outItemSpacing);
 
                 // Click on entity items
@@ -1714,6 +1764,7 @@ public:
                             int bOffset = totalSpawns + totalWepSpawns;
                             int pOffset = bOffset + (int)_map->brushes.size();
                             int dOffset = pOffset + (int)_map->props.size();
+                            int lOffset = dOffset + (int)_map->doors.size();
 
                             if (itemIdx >= bOffset && itemIdx < pOffset) {
                                 _selectionType = SelectionType::Brush;
@@ -1725,10 +1776,14 @@ public:
                                 _selectedIndex = itemIdx - pOffset;
                                 _selectedModel = _map->props[_selectedIndex].modelPath;
                                 logMessage("Outliner: Selected Prop #" + std::to_string(_selectedIndex));
-                            } else if (itemIdx >= dOffset) {
+                            } else if (itemIdx >= dOffset && itemIdx < lOffset) {
                                 _selectionType = SelectionType::Door;
                                 _selectedIndex = itemIdx - dOffset;
                                 logMessage("Outliner: Selected Door #" + std::to_string(_selectedIndex));
+                            } else if (itemIdx >= lOffset) {
+                                _selectionType = SelectionType::Light;
+                                _selectedIndex = itemIdx - lOffset;
+                                logMessage("Outliner: Selected Lamp Light #" + std::to_string(_selectedIndex) + " (" + _map->lights[_selectedIndex].name + ")");
                             }
                         }
                         return;
@@ -1863,6 +1918,35 @@ public:
                     }
                 }
 
+                // Lamp / Light Properties Interactions
+                if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+                    float propY = l.rightY + 38.0f;
+                    float colBtnY = propY + 116.0f;
+                    float colBtnW = 90.0f;
+                    auto& lt = _map->lights[_selectedIndex];
+
+                    // Row 1 Color Presets
+                    if (my >= colBtnY && my <= colBtnY + 24.0f) {
+                        if (mx >= l.rightX + 10.0f && mx <= l.rightX + 10.0f + colBtnW) { lt.color = Vec3(1.0f, 0.88f, 0.72f); logMessage("Light Color: Warm 2700K"); return; }
+                        if (mx >= l.rightX + 106.0f && mx <= l.rightX + 106.0f + colBtnW) { lt.color = Vec3(0.95f, 0.98f, 1.0f); logMessage("Light Color: Cool 6500K"); return; }
+                        if (mx >= l.rightX + 202.0f && mx <= l.rightX + 202.0f + colBtnW) { lt.color = Vec3(1.0f, 0.75f, 0.20f); logMessage("Light Color: Sodium Amber"); return; }
+                    }
+                    // Row 2 Color Presets
+                    if (my >= colBtnY + 28.0f && my <= colBtnY + 52.0f) {
+                        if (mx >= l.rightX + 10.0f && mx <= l.rightX + 10.0f + colBtnW) { lt.color = Vec3(0.20f, 0.90f, 1.0f); logMessage("Light Color: Neon Cyan"); return; }
+                        if (mx >= l.rightX + 106.0f && mx <= l.rightX + 106.0f + colBtnW) { lt.color = Vec3(1.0f, 0.15f, 0.15f); logMessage("Light Color: Hazard Red"); return; }
+                        if (mx >= l.rightX + 202.0f && mx <= l.rightX + 202.0f + colBtnW) { lt.color = Vec3(0.20f, 1.0f, 0.30f); logMessage("Light Color: Toxic Green"); return; }
+                    }
+                    // Intensity & Radius Adjusters
+                    float paramY = colBtnY + 64.0f + 18.0f;
+                    if (my >= paramY && my <= paramY + 24.0f) {
+                        if (mx >= l.rightX + 10.0f && mx <= l.rightX + 78.0f) { lt.intensity = std::max(0.2f, lt.intensity - 0.5f); logMessage("Light Intensity: " + std::to_string(lt.intensity)); return; }
+                        if (mx >= l.rightX + 82.0f && mx <= l.rightX + 150.0f) { lt.intensity += 0.5f; logMessage("Light Intensity: " + std::to_string(lt.intensity)); return; }
+                        if (mx >= l.rightX + 158.0f && mx <= l.rightX + 226.0f) { lt.radius = std::max(2.0f, lt.radius - 2.0f); logMessage("Light Radius: " + std::to_string((int)lt.radius) + "m"); return; }
+                        if (mx >= l.rightX + 230.0f && mx <= l.rightX + 298.0f) { lt.radius += 2.0f; logMessage("Light Radius: " + std::to_string((int)lt.radius) + "m"); return; }
+                    }
+                }
+
                 // UV Scale buttons [0.125] [0.25] [0.5] [1.0]
                 float scales[4] = { 0.125f, 0.25f, 0.5f, 1.0f };
                 for (int i = 0; i < 4; ++i) {
@@ -1989,6 +2073,23 @@ public:
         // 1. Begin 3D Frame & Frustum Culling
         Renderer::beginFrame(_camera);
 
+        // Upload dynamic map lights to the renderer
+        if (_map) {
+            std::vector<PointLight> dynamicLights;
+            dynamicLights.reserve(_map->lights.size());
+            for (const auto& lgt : _map->lights) {
+                dynamicLights.push_back(PointLight{
+                    .position = lgt.position,
+                    .color = lgt.color,
+                    .intensity = lgt.intensity,
+                    .radius = lgt.radius
+                });
+            }
+            Renderer::setPointLights(dynamicLights);
+        } else {
+            Renderer::clearPointLights();
+        }
+
         int totalBrushes = 0, renderedBrushes = 0;
         int totalProps = 0, renderedProps = 0;
 
@@ -2090,6 +2191,17 @@ public:
                                        Vec3(0.12f, 0.14f, 0.82f), Vec3(0.35f, 0.65f, 0.95f), wTex, false);
                 }
             }
+
+            // Render All Map Dynamic Lights (Lamps)
+            for (size_t i = 0; i < _map->lights.size(); ++i) {
+                const auto& lgt = _map->lights[i];
+                // Core glowing bulb
+                Renderer::drawCube(lgt.position, Vec3(0.35f, 0.35f, 0.35f), lgt.color, nullptr, false);
+                // Fixture cap / stand mount
+                Renderer::drawCube(lgt.position + Vec3(0.0f, 0.22f, 0.0f), Vec3(0.42f, 0.10f, 0.42f), Vec3(0.25f, 0.27f, 0.30f), nullptr, false);
+                // Wireframe light bulb cage / glow halo
+                Renderer::drawWireCube(lgt.position, Vec3(0.55f, 0.55f, 0.55f), lgt.color);
+            }
         }
 
         _cullingStats = "Frustum Culling: Brushes " + std::to_string(renderedBrushes) + "/" + std::to_string(totalBrushes) +
@@ -2122,6 +2234,11 @@ public:
                 const auto& ws = _map->weaponSpawners[_selectedIndex];
                 Renderer::drawBoundingBox(ws.position - Vec3(0.7f, 0.0f, 0.7f), ws.position + Vec3(0.7f, 0.8f, 0.7f), hammerOrange);
                 drawGizmo(ws.position);
+            } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+                const auto& lgt = _map->lights[_selectedIndex];
+                Renderer::drawBoundingBox(lgt.position - Vec3(0.4f, 0.4f, 0.4f), lgt.position + Vec3(0.4f, 0.4f, 0.4f), hammerOrange);
+                Renderer::drawWireCube(lgt.position, Vec3(lgt.radius * 2.0f, lgt.radius * 2.0f, lgt.radius * 2.0f), lgt.color * 0.4f);
+                drawGizmo(lgt.position);
             }
         }
 
@@ -2144,6 +2261,13 @@ public:
             drawGizmo(_cursorPos);
         } else if (_activeTool == 6) {
             drawClipToolOverlay();
+        } else if (_activeTool == 7) {
+            // Lamp Placement Tool preview
+            Renderer::drawWireCube(_cursorPos, Vec3(0.6f, 0.6f, 0.6f), _lampColor);
+            Renderer::drawCube(_cursorPos, Vec3(0.35f, 0.35f, 0.35f), _lampColor, nullptr, false);
+            Renderer::drawCube(_cursorPos + Vec3(0.0f, 0.22f, 0.0f), Vec3(0.42f, 0.10f, 0.42f), Vec3(0.25f, 0.27f, 0.30f), nullptr, false);
+            Renderer::drawWireCube(_cursorPos, Vec3(_lampRadius * 2.0f, _lampRadius * 2.0f, _lampRadius * 2.0f), _lampColor * 0.4f);
+            drawGizmo(_cursorPos);
         }
 
         // 2. Render 2D Lab Hammer Desktop Interface
@@ -2421,7 +2545,7 @@ public:
 
             int totalSpawns = (int)_map->spawnPoints.size();
             int totalWepSpawns = (int)_map->weaponSpawners.size();
-            int totalEntities = (int)(totalSpawns + totalWepSpawns + _map->brushes.size() + _map->props.size() + _map->doors.size());
+            int totalEntities = (int)(totalSpawns + totalWepSpawns + _map->brushes.size() + _map->props.size() + _map->doors.size() + _map->lights.size());
             int maxItems = (int)(l.outListH / l.outItemSpacing);
 
             for (int i = 0; i < maxItems; ++i) {
@@ -2447,6 +2571,7 @@ public:
                     int bOffset = totalSpawns + totalWepSpawns;
                     int pOffset = bOffset + (int)_map->brushes.size();
                     int dOffset = pOffset + (int)_map->props.size();
+                    int lOffset = dOffset + (int)_map->doors.size();
 
                     if (itemIdx >= bOffset && itemIdx < pOffset) {
                         int bIdx = itemIdx - bOffset;
@@ -2460,10 +2585,14 @@ public:
                         std::string mName = _map->props[pIdx].modelPath;
                         if (mName.size() > 14) mName = mName.substr(0, 12) + "..";
                         itemText = "[P#" + std::to_string(pIdx) + "] " + mName;
-                    } else if (itemIdx >= dOffset) {
+                    } else if (itemIdx >= dOffset && itemIdx < lOffset) {
                         int dIdx = itemIdx - dOffset;
                         isSelected = (_selectionType == SelectionType::Door && _selectedIndex == dIdx);
                         itemText = "[D#" + std::to_string(dIdx) + "] " + _map->doors[dIdx].name;
+                    } else if (itemIdx >= lOffset) {
+                        int lIdx = itemIdx - lOffset;
+                        isSelected = (_selectionType == SelectionType::Light && _selectedIndex == lIdx);
+                        itemText = "[LIGHT #" + std::to_string(lIdx) + "] " + _map->lights[lIdx].name;
                     }
                 }
 
@@ -2562,6 +2691,66 @@ public:
                 // Deselect & Delete buttons
                 drawDarkButton(l.deselX, l.deselY, l.deselW, l.deselH, "Deselect All");
                 drawDarkButton(l.delX, l.delY, l.delW, l.delH, "Delete Spawn Point", false, true);
+            } else if (_selectionType == SelectionType::Light && _selectedIndex >= 0 && _selectedIndex < (int)_map->lights.size()) {
+                auto& lt = _map->lights[_selectedIndex];
+                std::string selHeader = "Selection: Lamp Light #" + std::to_string(_selectedIndex);
+                LabFont::drawText(l.rightX + 12.0f, propY, selHeader, 1.7f, orangeGlow, LabFontType::System);
+
+                std::string nameStr = "Name: " + lt.name;
+                LabFont::drawText(l.rightX + 12.0f, propY + 24.0f, nameStr, 1.5f, greenAccent, LabFontType::System);
+
+                std::string posStr = "Pos: (" + std::to_string((int)lt.position.x) + ", " + std::to_string((int)lt.position.y) + ", " + std::to_string((int)lt.position.z) + ")";
+                LabFont::drawText(l.rightX + 12.0f, propY + 46.0f, posStr, 1.5f, textLight, LabFontType::System);
+
+                char statsBuf[64];
+                std::snprintf(statsBuf, sizeof(statsBuf), "Intensity: %.1f | Radius: %.1fm", lt.intensity, lt.radius);
+                LabFont::drawText(l.rightX + 12.0f, propY + 68.0f, statsBuf, 1.5f, cyanGlow, LabFontType::System);
+
+                // Color swatch
+                Renderer::drawRect(l.rightX + 12.0f, propY + 90.0f, 280.0f, 6.0f, lt.color);
+
+                // Color presets
+                LabFont::drawText(l.rightX + 12.0f, propY + 102.0f, "Kelvin / Atmosphere Color Presets:", 1.5f, textLight, LabFontType::System);
+                float colBtnY = propY + 116.0f;
+                float colBtnW = 90.0f;
+                drawDarkButton(l.rightX + 10.0f, colBtnY, colBtnW, 24.0f, "Warm 2700K");
+                drawDarkButton(l.rightX + 106.0f, colBtnY, colBtnW, 24.0f, "Cool 6500K");
+                drawDarkButton(l.rightX + 202.0f, colBtnY, colBtnW, 24.0f, "Sodium");
+
+                drawDarkButton(l.rightX + 10.0f, colBtnY + 28.0f, colBtnW, 24.0f, "Neon Cyan");
+                drawDarkButton(l.rightX + 106.0f, colBtnY + 28.0f, colBtnW, 24.0f, "Hazard Red");
+                drawDarkButton(l.rightX + 202.0f, colBtnY + 28.0f, colBtnW, 24.0f, "Toxic Green");
+
+                // Intensity & Radius adjusters
+                float paramY = colBtnY + 64.0f;
+                LabFont::drawText(l.rightX + 12.0f, paramY, "Adjust Intensity & Radius:", 1.5f, textLight, LabFontType::System);
+                drawDarkButton(l.rightX + 10.0f, paramY + 18.0f, 68.0f, 24.0f, "Int -");
+                drawDarkButton(l.rightX + 82.0f, paramY + 18.0f, 68.0f, 24.0f, "Int +");
+                drawDarkButton(l.rightX + 158.0f, paramY + 18.0f, 68.0f, 24.0f, "Rad -");
+                drawDarkButton(l.rightX + 230.0f, paramY + 18.0f, 68.0f, 24.0f, "Rad +");
+
+                // Move position [-] [+]
+                LabFont::drawText(l.rightX + 12.0f, l.posBtnsY - 18.0f, "Move Light Position (X / Y / Z):", 1.7f, cyanGlow, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, l.posBtnsY + 4.0f, "X:", 1.6f, textLight, LabFontType::System);
+                drawDarkButton(l.rightX + 30.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "-");
+                drawDarkButton(l.rightX + 60.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "+");
+
+                LabFont::drawText(l.rightX + 105.0f, l.posBtnsY + 4.0f, "Y:", 1.6f, greenAccent, LabFontType::System);
+                drawDarkButton(l.rightX + 123.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "-");
+                drawDarkButton(l.rightX + 153.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "+");
+
+                LabFont::drawText(l.rightX + 198.0f, l.posBtnsY + 4.0f, "Z:", 1.6f, textLight, LabFontType::System);
+                drawDarkButton(l.rightX + 216.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "-");
+                drawDarkButton(l.rightX + 246.0f, l.posBtnsY, l.posBtnW, l.posBtnH, "+");
+
+                // Elevation buttons
+                drawDarkButton(l.elevUpX, l.elevUpY, l.elevUpW, l.elevUpH, "^ UP (+Y)", false, false, true);
+                drawDarkButton(l.elevDwnX, l.elevDwnY, l.elevDwnW, l.elevDwnH, "v DOWN (-Y)");
+                drawDarkButton(l.elevGndX, l.elevGndY, l.elevGndW, l.elevGndH, "Floor (Y=0)");
+
+                // Deselect & Delete buttons
+                drawDarkButton(l.deselX, l.deselY, l.deselW, l.deselH, "Deselect All");
+                drawDarkButton(l.delX, l.delY, l.delW, l.delH, "Delete Lamp Light", false, true);
             } else {
 
             // Header info on selection
@@ -2570,6 +2759,7 @@ public:
             else if (_selectionType == SelectionType::Prop) selHeader = "Selection: Prop #" + std::to_string(_selectedIndex);
             else if (_selectionType == SelectionType::Door) selHeader = "Selection: Door #" + std::to_string(_selectedIndex);
             else if (_selectionType == SelectionType::Spawn) selHeader = "Selection: Player Spawn";
+            else if (_selectionType == SelectionType::Light) selHeader = "Selection: Lamp Light #" + std::to_string(_selectedIndex);
 
             LabFont::drawText(l.rightX + 12.0f, propY, selHeader, 1.7f, (_selectionType != SelectionType::None) ? orangeGlow : textLight, LabFontType::System);
 
@@ -2950,6 +3140,12 @@ private:
     Vec3 _propScale{ 1.0f, 1.0f, 1.0f };
     float _gridSnap = 1.0f;
     float _sunAngle = 45.0f;
+
+    // Lamp / Light Tool State
+    Vec3 _lampColor{ 1.0f, 0.95f, 0.85f }; // Warm 2700K incandescent
+    float _lampIntensity = 2.5f;
+    float _lampRadius = 14.0f;
+    MapLightType _lampType = MapLightType::Point;
 
     // CSG Clipping Tool State
     ClipMode _clipMode = ClipMode::KeepBoth;
