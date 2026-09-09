@@ -318,23 +318,57 @@ public:
         _mouseScreenX = mx;
         _mouseScreenY = my;
 
-        // Mouse look in 3D Viewport when holding Right Mouse Button
-        if (Input::isMouseButtonPressed(1)) {
-            _camera.update(Input::mouseDelta);
-        }
-
         // Raycast mouse cursor onto floor or scene when hovering 3D viewport so 3D cursor follows the mouse!
         float vpX = 42.0f;
         float vpY = 58.0f;
-        float vpW = (float)fbW - vpX - 320.0f;
-        float vpH = (float)fbH - vpY - 26.0f;
+        float vpW = (fbW > 0 ? (float)fbW : (float)getWidth()) - vpX - 320.0f;
+        float vpH = (fbH > 0 ? (float)fbH : (float)getHeight()) - vpY - 22.0f;
         bool in3DViewport = (mx >= vpX && mx <= vpX + vpW && my >= vpY && my <= vpY + vpH);
+
+        // Mouse look in 3D Viewport when holding Right Mouse Button
+        if (Input::isMouseButtonPressed(1)) {
+            if (_activeTool != 3) {
+                if (!_isFlyingCamera && in3DViewport) {
+                    _isFlyingCamera = true;
+                    setCursorCaptured(true);
+                }
+                if (_isFlyingCamera) {
+                    _camera.update(Input::mouseDelta);
+                }
+            }
+        } else {
+            if (_isFlyingCamera) {
+                _isFlyingCamera = false;
+                setCursorCaptured(false);
+            }
+        }
 
         if (in3DViewport && !Input::isMouseButtonPressed(1)) {
             Vec3 rayDir = _camera.screenToWorldRay(mx, my, (float)fbW, (float)fbH);
-            if (std::abs(rayDir.y) > 0.0001f) {
+            float closestT = 1e9f;
+            Vec3 hitPoint;
+            bool hitSomething = false;
+
+            // Test raycast against existing scene geometry (brushes)
+            if (_map) {
+                for (const auto& b : _map->brushes) {
+                    Vec3 half = b.size * 0.5f;
+                    float t = 0.0f;
+                    if (rayIntersectAABB(_camera.getPosition(), rayDir, b.position - half, b.position + half, t)) {
+                        if (t > 0.001f && t < closestT) {
+                            closestT = t;
+                            hitPoint = _camera.getPosition() + rayDir * t;
+                            hitSomething = true;
+                        }
+                    }
+                }
+            }
+
+            if (hitSomething && closestT < 300.0f) {
+                _cursorPos = snapToGrid(hitPoint, _gridSnap);
+            } else if (std::abs(rayDir.y) > 0.0001f) {
                 float t = -_camera.getPosition().y / rayDir.y;
-                if (t > 0.0f && t < 200.0f) {
+                if (t > 0.0f && t < 300.0f) {
                     Vec3 hit = _camera.getPosition() + rayDir * t;
                     _cursorPos = snapToGrid(hit, _gridSnap);
                 } else {
@@ -729,7 +763,20 @@ public:
             } else if (_selectionType == SelectionType::WeaponSpawner) {
                 logMessage("Selected Weapon Spawner [" + _map->weaponSpawners[hitIndex].getWeaponName() + "] #" + std::to_string(hitIndex));
             } else {
+                _selectionType = SelectionType::None;
+                _selectedIndex = -1;
                 logMessage("Deselected all");
+            }
+        } else if (_activeTool == 1 || _activeTool == 2 || _activeTool == 4 || _activeTool == 5) {
+            if (!isRmb) {
+                if (Input::isKeyPressed(340) && hitType != SelectionType::None) {
+                    // Shift + Click selects existing entity even while placement tool is active
+                    _selectionType = hitType;
+                    _selectedIndex = hitIndex;
+                    logMessage("Selected Entity #" + std::to_string(hitIndex));
+                } else {
+                    placeCurrentObject();
+                }
             }
         }
     }
@@ -2030,12 +2077,64 @@ public:
         Renderer::endFrame();
     }
 
+    // Studio Dark Industrial Styling Helpers
+    static void drawDarkBevel(float x, float y, float w, float h, bool sunken) {
+        Vec3 light = sunken ? Vec3(0.08f, 0.09f, 0.11f) : Vec3(0.38f, 0.40f, 0.45f);
+        Vec3 dark  = sunken ? Vec3(0.38f, 0.40f, 0.45f) : Vec3(0.08f, 0.09f, 0.11f);
+
+        // Top line
+        Renderer::drawRect(x, y, w, 1.0f, light);
+        // Left line
+        Renderer::drawRect(x, y, 1.0f, h, light);
+        // Bottom line
+        Renderer::drawRect(x, y + h - 1.0f, w, 1.0f, dark);
+        // Right line
+        Renderer::drawRect(x + w - 1.0f, y, 1.0f, h, dark);
+    }
+
+    static void drawDarkPanel(float x, float y, float w, float h, const std::string& title = "") {
+        Vec3 bgCol(0.18f, 0.19f, 0.22f); // Studio dark slate
+        Renderer::drawRect(x, y, w, h, bgCol);
+        drawDarkBevel(x, y, w, h, false);
+
+        if (!title.empty()) {
+            Vec3 titleBg(0.14f, 0.22f, 0.32f); // Studio dark blue header
+            Renderer::drawRect(x + 2.0f, y + 2.0f, w - 4.0f, 20.0f, titleBg);
+            LabFont::drawText(x + 8.0f, y + 5.0f, title, 1.5f, Vec3(1.0f, 1.0f, 1.0f), LabFontType::System);
+        }
+    }
+
+    bool drawDarkButton(float x, float y, float w, float h, const std::string& label, bool active = false, bool isRed = false, bool isGreen = false) {
+        bool hovered = (_mouseScreenX >= x && _mouseScreenX <= x + w && _mouseScreenY >= y && _mouseScreenY <= y + h);
+
+        Vec3 bgCol = active ? Vec3(0.85f, 0.48f, 0.10f) :
+                     isRed ? (hovered ? Vec3(0.75f, 0.22f, 0.22f) : Vec3(0.55f, 0.16f, 0.16f)) :
+                     isGreen ? (hovered ? Vec3(0.22f, 0.65f, 0.32f) : Vec3(0.16f, 0.50f, 0.25f)) :
+                     hovered ? Vec3(0.32f, 0.35f, 0.40f) : Vec3(0.24f, 0.25f, 0.28f);
+
+        Renderer::drawRect(x, y, w, h, bgCol);
+        drawDarkBevel(x, y, w, h, active);
+
+        Vec3 txtCol = active ? Vec3(1.0f, 1.0f, 1.0f) :
+                      hovered ? Vec3(1.0f, 0.95f, 0.70f) :
+                      isRed ? Vec3(1.0f, 0.85f, 0.85f) :
+                      isGreen ? Vec3(0.90f, 1.0f, 0.90f) :
+                      Vec3(0.90f, 0.92f, 0.95f);
+
+        float textX = x + 8.0f;
+        float textY = y + (h - 14.0f) * 0.5f;
+        LabFont::drawText(textX, textY, label, 1.4f, txtCol, LabFontType::System);
+        return hovered;
+    }
+
     // Hammer Toolbar & Palette Icon Renderers are shared from Lab::HammerIcons (LabEditor.h)
     static void drawHammerIcon(int iconId, float x, float y, const Vec3& color, const Vec3& bg) {
         Lab::HammerIcons::drawHammerIcon(iconId, x, y, color, bg);
+        drawDarkBevel(x, y, 24.0f, 24.0f, false);
     }
     static void drawToolbarIcon(int iconId, float x, float y, const Vec3& color, const Vec3& bg) {
         Lab::HammerIcons::drawToolbarIcon(iconId, x, y, color, bg);
+        drawDarkBevel(x, y, 24.0f, 24.0f, false);
     }
 
     void drawHammerInterface() {
@@ -2046,16 +2145,20 @@ public:
 
         Renderer::beginUI((int)w, (int)h);
 
-        Vec3 winBg{ 0.93f, 0.93f, 0.94f };          // Win32 Editor Gray
-        Vec3 winBorder{ 0.65f, 0.65f, 0.68f };      // Bevel Gray
-        Vec3 textDark{ 0.12f, 0.12f, 0.12f };       // Dark Gray Text
-        Vec3 textDim{ 0.45f, 0.45f, 0.45f };        // Dim Label
-        Vec3 cyanGlow{ 0.2f, 0.75f, 0.95f };        // Cyan accent
-        Vec3 orangeGlow{ 1.0f, 0.55f, 0.1f };       // Hammer Orange
+        // Studio Dark Theme Colors
+        Vec3 panelDarkBg{ 0.18f, 0.19f, 0.22f };     // Dark Slate Panel BG
+        Vec3 panelDarker{ 0.14f, 0.15f, 0.17f };     // Well / Header Dark BG
+        Vec3 wellBg{ 0.11f, 0.12f, 0.14f };          // Sunken Area BG
+        Vec3 textLight{ 0.92f, 0.93f, 0.96f };       // Off-White Primary Text
+        Vec3 textDim{ 0.58f, 0.62f, 0.68f };         // Subdued Text
+        Vec3 cyanGlow{ 0.20f, 0.75f, 0.95f };        // Studio Cyan
+        Vec3 orangeGlow{ 1.0f, 0.55f, 0.10f };       // Hammer Orange
+        Vec3 greenAccent{ 0.18f, 0.72f, 0.38f };     // Studio Green
+        Vec3 redAccent{ 0.85f, 0.25f, 0.25f };       // Studio Red / Delete
 
         // ==================== 1. TOP TITLEBAR & MENUS ====================
-        Renderer::drawRect(0, 0, w, 24.0f, winBg);
-        Renderer::drawRect(0, 23.0f, w, 1.0f, winBorder);
+        Renderer::drawRect(0, 0, w, 24.0f, panelDarker);
+        drawDarkBevel(0, 0, w, 24.0f, false);
 
         bool hovFile = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 10.0f && _mouseScreenX <= 50.0f);
         bool hovEdit = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 52.0f && _mouseScreenX <= 90.0f);
@@ -2063,71 +2166,88 @@ public:
         bool hovTools = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 137.0f && _mouseScreenX <= 185.0f);
         bool hovHelp = (_mouseScreenY >= 0.0f && _mouseScreenY <= 24.0f && _mouseScreenX >= 187.0f && _mouseScreenX <= 230.0f);
 
-        if (hovFile) Renderer::drawRect(10.0f, 2.0f, 40.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
-        if (hovEdit) Renderer::drawRect(52.0f, 2.0f, 38.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
-        if (hovView) Renderer::drawRect(92.0f, 2.0f, 43.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
-        if (hovTools) Renderer::drawRect(137.0f, 2.0f, 48.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
-        if (hovHelp) Renderer::drawRect(187.0f, 2.0f, 43.0f, 20.0f, Vec3(0.80f, 0.88f, 0.98f));
+        if (hovFile) Renderer::drawRect(10.0f, 2.0f, 40.0f, 20.0f, Vec3(0.24f, 0.28f, 0.36f));
+        if (hovEdit) Renderer::drawRect(52.0f, 2.0f, 38.0f, 20.0f, Vec3(0.24f, 0.28f, 0.36f));
+        if (hovView) Renderer::drawRect(92.0f, 2.0f, 43.0f, 20.0f, Vec3(0.24f, 0.28f, 0.36f));
+        if (hovTools) Renderer::drawRect(137.0f, 2.0f, 48.0f, 20.0f, Vec3(0.24f, 0.28f, 0.36f));
+        if (hovHelp) Renderer::drawRect(187.0f, 2.0f, 43.0f, 20.0f, Vec3(0.24f, 0.28f, 0.36f));
 
-        LabFont::drawText(14.0f, 5.0f, "File", 1.8f, hovFile ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
-        LabFont::drawText(54.0f, 5.0f, "Edit", 1.8f, hovEdit ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
-        LabFont::drawText(94.0f, 5.0f, "View", 1.8f, hovView ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
-        LabFont::drawText(140.0f, 5.0f, "Tools", 1.8f, hovTools ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
-        LabFont::drawText(190.0f, 5.0f, "Help", 1.8f, hovHelp ? Vec3(0.05f, 0.25f, 0.65f) : textDark, LabFontType::System);
+        LabFont::drawText(14.0f, 5.0f, "File", 1.8f, hovFile ? orangeGlow : textLight, LabFontType::System);
+        LabFont::drawText(54.0f, 5.0f, "Edit", 1.8f, hovEdit ? orangeGlow : textLight, LabFontType::System);
+        LabFont::drawText(94.0f, 5.0f, "View", 1.8f, hovView ? orangeGlow : textLight, LabFontType::System);
+        LabFont::drawText(140.0f, 5.0f, "Tools", 1.8f, hovTools ? orangeGlow : textLight, LabFontType::System);
+        LabFont::drawText(190.0f, 5.0f, "Help", 1.8f, hovHelp ? orangeGlow : textLight, LabFontType::System);
 
-        LabFont::drawText(w - 360.0f, 5.0f, "Lab Hammer 4.1 - 3D Level Editor", 1.8f, Vec3(0.15f, 0.45f, 0.75f), LabFontType::GeoSans);
+        LabFont::drawText(w - 380.0f, 5.0f, "Lab Hammer 4.1 - 3D Level Editor", 1.8f, orangeGlow, LabFontType::GeoSans);
 
         // ==================== 2. MAIN TOOLBAR (18 Buttons) ====================
         float tbY = 24.0f;
         float tbH = 34.0f;
-        Renderer::drawRect(0, tbY, w, tbH, winBg);
-        Renderer::drawRect(0, tbY + tbH - 1.0f, w, 1.0f, winBorder);
+        Renderer::drawRect(0, tbY, w, tbH, panelDarkBg);
+        drawDarkBevel(0, tbY, w, tbH, false);
 
         for (int i = 0; i < 18; ++i) {
             float bx = 8.0f + i * 28.0f;
-            drawToolbarIcon(i, bx, tbY + 5.0f, (i == 17) ? Vec3(1, 1, 1) : Vec3(0.25f, 0.3f, 0.35f), (i == 17) ? Vec3(0.15f, 0.65f, 0.35f) : Vec3(0.88f, 0.88f, 0.90f));
+            bool isHov = (_mouseScreenX >= bx && _mouseScreenX <= bx + 26.0f && _mouseScreenY >= tbY + 4.0f && _mouseScreenY <= tbY + 30.0f);
+            Vec3 bgCol = (i == 17) ? (isHov ? Vec3(0.22f, 0.80f, 0.42f) : greenAccent) :
+                         (isHov ? Vec3(0.32f, 0.35f, 0.40f) : Vec3(0.22f, 0.23f, 0.26f));
+            Vec3 iconCol = (i == 17) ? Vec3(1, 1, 1) :
+                           (isHov ? Vec3(1.0f, 0.95f, 0.80f) : Vec3(0.85f, 0.88f, 0.92f));
+
+            Renderer::drawRect(bx, tbY + 4.0f, 26.0f, 26.0f, bgCol);
+            drawDarkBevel(bx, tbY + 4.0f, 26.0f, 26.0f, false);
+            drawToolbarIcon(i, bx + 1.0f, tbY + 5.0f, iconCol, bgCol);
         }
 
         // ==================== 3. LEFT TOOLS PALETTE (Tools 0..7) ====================
         float leftW = 42.0f;
         float leftY = tbY + tbH;
         float leftH = h - leftY - 22.0f;
-        Renderer::drawRect(0, leftY, leftW, leftH, winBg);
-        Renderer::drawRect(leftW - 1.0f, leftY, 1.0f, leftH, winBorder);
+        Renderer::drawRect(0, leftY, leftW, leftH, panelDarker);
+        drawDarkBevel(0, leftY, leftW, leftH, false);
 
         for (int i = 0; i < 8; ++i) {
             float ty = leftY + 10.0f + i * 36.0f;
             bool isSel = (_activeTool == i);
             bool isHov = (_mouseScreenX >= 6.0f && _mouseScreenX <= 36.0f && _mouseScreenY >= ty && _mouseScreenY <= ty + 30.0f);
-            Vec3 bgCol = isSel ? Vec3(0.78f, 0.88f, 1.0f) : (isHov ? Vec3(0.92f, 0.95f, 1.0f) : Vec3(0.88f, 0.88f, 0.90f));
-            Vec3 iconCol = isSel ? orangeGlow : (isHov ? Vec3(0.15f, 0.45f, 0.85f) : Vec3(0.25f, 0.28f, 0.32f));
+            Vec3 bgCol = isSel ? orangeGlow : (isHov ? Vec3(0.32f, 0.35f, 0.40f) : Vec3(0.22f, 0.23f, 0.26f));
+            Vec3 iconCol = isSel ? Vec3(1, 1, 1) : (isHov ? Vec3(1.0f, 0.85f, 0.50f) : Vec3(0.82f, 0.85f, 0.90f));
 
             Renderer::drawRect(6.0f, ty, 30.0f, 30.0f, bgCol);
-            Renderer::drawRect(6.0f, ty, 30.0f, 1.0f, isSel ? cyanGlow : (isHov ? cyanGlow : winBorder));
+            drawDarkBevel(6.0f, ty, 30.0f, 30.0f, isSel);
             drawHammerIcon(i, 9.0f, ty + 3.0f, iconCol, bgCol);
         }
 
         // ==================== 4. RIGHT SIDEBAR (Synchronized Layout) ====================
         SidebarLayout l = getSidebarLayout(w, h);
-        Renderer::drawRect(l.rightX, l.rightY, l.rightW, l.rightH, winBg);
-        Renderer::drawRect(l.rightX, l.rightY, 1.0f, l.rightH, winBorder);
+        Renderer::drawRect(l.rightX, l.rightY, l.rightW, l.rightH, panelDarkBg);
+        drawDarkBevel(l.rightX, l.rightY, l.rightW, l.rightH, false);
 
         // Sidebar Tabs: [ Properties ] [ Struktura ] [ Prebuilty ]
         bool isPropTab = (_sidebarTab == SidebarTab::Properties);
         bool isOutTab = (_sidebarTab == SidebarTab::Hierarchy);
         bool isPreTab = (_sidebarTab == SidebarTab::Prebuilts);
 
-        Renderer::drawRect(l.tabPropX, l.tabPropY, l.tabPropW, l.tabPropH, isPropTab ? Vec3(1, 1, 1) : Vec3(0.85f, 0.85f, 0.88f));
-        Renderer::drawRect(l.tabPropX, l.tabPropY, l.tabPropW, 1.0f, isPropTab ? orangeGlow : winBorder);
-        LabFont::drawText(l.tabPropX + 12.0f, l.tabPropY + 5.0f, "Properties", 1.5f, isPropTab ? textDark : textDim, LabFontType::System);
+        // Tab Properties
+        Vec3 propTabBg = isPropTab ? Vec3(0.24f, 0.26f, 0.30f) : Vec3(0.16f, 0.17f, 0.19f);
+        Renderer::drawRect(l.tabPropX, l.tabPropY, l.tabPropW, l.tabPropH, propTabBg);
+        drawDarkBevel(l.tabPropX, l.tabPropY, l.tabPropW, l.tabPropH, isPropTab);
+        if (isPropTab) Renderer::drawRect(l.tabPropX, l.tabPropY + l.tabPropH - 2.0f, l.tabPropW, 2.0f, orangeGlow);
+        LabFont::drawText(l.tabPropX + 12.0f, l.tabPropY + 5.0f, "Properties", 1.5f, isPropTab ? Vec3(1, 1, 1) : textDim, LabFontType::System);
 
-        Renderer::drawRect(l.tabOutX, l.tabOutY, l.tabOutW, l.tabOutH, isOutTab ? Vec3(1, 1, 1) : Vec3(0.85f, 0.85f, 0.88f));
-        Renderer::drawRect(l.tabOutX, l.tabOutY, l.tabOutW, 1.0f, isOutTab ? orangeGlow : winBorder);
-        LabFont::drawText(l.tabOutX + 16.0f, l.tabOutY + 5.0f, "Struktura", 1.5f, isOutTab ? textDark : textDim, LabFontType::System);
+        // Tab Struktura
+        Vec3 outTabBg = isOutTab ? Vec3(0.24f, 0.26f, 0.30f) : Vec3(0.16f, 0.17f, 0.19f);
+        Renderer::drawRect(l.tabOutX, l.tabOutY, l.tabOutW, l.tabOutH, outTabBg);
+        drawDarkBevel(l.tabOutX, l.tabOutY, l.tabOutW, l.tabOutH, isOutTab);
+        if (isOutTab) Renderer::drawRect(l.tabOutX, l.tabOutY + l.tabOutH - 2.0f, l.tabOutW, 2.0f, orangeGlow);
+        LabFont::drawText(l.tabOutX + 16.0f, l.tabOutY + 5.0f, "Struktura", 1.5f, isOutTab ? Vec3(1, 1, 1) : textDim, LabFontType::System);
 
-        Renderer::drawRect(l.tabPreX, l.tabPreY, l.tabPreW, l.tabPreH, isPreTab ? Vec3(1, 1, 1) : Vec3(0.85f, 0.85f, 0.88f));
-        Renderer::drawRect(l.tabPreX, l.tabPreY, l.tabPreW, 1.0f, isPreTab ? orangeGlow : winBorder);
-        LabFont::drawText(l.tabPreX + 16.0f, l.tabPreY + 5.0f, "Prebuilty", 1.5f, isPreTab ? textDark : textDim, LabFontType::System);
+        // Tab Prebuilty
+        Vec3 preTabBg = isPreTab ? Vec3(0.24f, 0.26f, 0.30f) : Vec3(0.16f, 0.17f, 0.19f);
+        Renderer::drawRect(l.tabPreX, l.tabPreY, l.tabPreW, l.tabPreH, preTabBg);
+        drawDarkBevel(l.tabPreX, l.tabPreY, l.tabPreW, l.tabPreH, isPreTab);
+        if (isPreTab) Renderer::drawRect(l.tabPreX, l.tabPreY + l.tabPreH - 2.0f, l.tabPreW, 2.0f, orangeGlow);
+        LabFont::drawText(l.tabPreX + 16.0f, l.tabPreY + 5.0f, "Prebuilty", 1.5f, isPreTab ? Vec3(1, 1, 1) : textDim, LabFontType::System);
 
         // ==================== TAB CONTENT: PREBUILTS & ENTITIES ====================
         if (_sidebarTab == SidebarTab::Prebuilts) {
@@ -2137,13 +2257,15 @@ public:
             bool isCat0 = (_prebuiltCategory == 0);
             bool isCat1 = (_prebuiltCategory == 1);
 
-            Renderer::drawRect(l.rightX + 10.0f, catY, catW, 24.0f, isCat0 ? Vec3(1, 1, 1) : Vec3(0.85f, 0.85f, 0.88f));
-            Renderer::drawRect(l.rightX + 10.0f, catY, catW, 1.0f, isCat0 ? orangeGlow : winBorder);
-            LabFont::drawText(l.rightX + 16.0f, catY + 4.0f, "Encje / Baza", 1.5f, isCat0 ? textDark : textDim, LabFontType::System);
+            Renderer::drawRect(l.rightX + 10.0f, catY, catW, 24.0f, isCat0 ? Vec3(0.26f, 0.28f, 0.32f) : Vec3(0.16f, 0.17f, 0.19f));
+            drawDarkBevel(l.rightX + 10.0f, catY, catW, 24.0f, isCat0);
+            if (isCat0) Renderer::drawRect(l.rightX + 10.0f, catY + 22.0f, catW, 2.0f, orangeGlow);
+            LabFont::drawText(l.rightX + 16.0f, catY + 4.0f, "Encje / Baza", 1.5f, isCat0 ? Vec3(1, 1, 1) : textDim, LabFontType::System);
 
-            Renderer::drawRect(l.rightX + 14.0f + catW, catY, catW, 24.0f, isCat1 ? Vec3(1, 1, 1) : Vec3(0.85f, 0.85f, 0.88f));
-            Renderer::drawRect(l.rightX + 14.0f + catW, catY, catW, 1.0f, isCat1 ? orangeGlow : winBorder);
-            LabFont::drawText(l.rightX + 20.0f + catW, catY + 4.0f, "Bronie (Spawny)", 1.5f, isCat1 ? textDark : textDim, LabFontType::System);
+            Renderer::drawRect(l.rightX + 14.0f + catW, catY, catW, 24.0f, isCat1 ? Vec3(0.26f, 0.28f, 0.32f) : Vec3(0.16f, 0.17f, 0.19f));
+            drawDarkBevel(l.rightX + 14.0f + catW, catY, catW, 24.0f, isCat1);
+            if (isCat1) Renderer::drawRect(l.rightX + 14.0f + catW, catY + 22.0f, catW, 2.0f, orangeGlow);
+            LabFont::drawText(l.rightX + 20.0f + catW, catY + 4.0f, "Bronie (Spawny)", 1.5f, isCat1 ? Vec3(1, 1, 1) : textDim, LabFontType::System);
 
             struct PrebuiltDesc {
                 std::string title;
@@ -2184,25 +2306,28 @@ public:
 
             for (int i = 0; i < count; ++i) {
                 float cy = startY + i * cardSpacing;
-                Renderer::drawRect(l.rightX + 10.0f, cy, l.rightW - 20.0f, cardH, Vec3(1, 1, 1));
-                Renderer::drawRect(l.rightX + 10.0f, cy, l.rightW - 20.0f, 1.0f, winBorder);
+                bool isHov = (_mouseScreenX >= l.rightX + 10.0f && _mouseScreenX <= l.rightX + l.rightW - 10.0f && _mouseScreenY >= cy && _mouseScreenY <= cy + cardH);
+                Vec3 cardBg = isHov ? Vec3(0.26f, 0.28f, 0.32f) : Vec3(0.20f, 0.21f, 0.24f);
+
+                Renderer::drawRect(l.rightX + 10.0f, cy, l.rightW - 20.0f, cardH, cardBg);
+                drawDarkBevel(l.rightX + 10.0f, cy, l.rightW - 20.0f, cardH, false);
                 Renderer::drawRect(l.rightX + 10.0f, cy, 6.0f, cardH, activeItems[i].color);
 
                 // Dedicated entity / weapon icon for each prebuilt item
                 int iconType = isCat0 ? (i == 8 ? 9 : (i == 9 ? 10 : i)) : 8; // 8 = Weapon Silhouette, 9 = Crate, 10 = Barrel
-                Lab::HammerIcons::drawEntityIcon(iconType, l.rightX + 20.0f, cy + (cardH - 26.0f) * 0.5f, activeItems[i].color, Vec3(0.93f, 0.94f, 0.96f));
+                Lab::HammerIcons::drawEntityIcon(iconType, l.rightX + 20.0f, cy + (cardH - 26.0f) * 0.5f, activeItems[i].color, Vec3(0.14f, 0.15f, 0.17f));
 
-                LabFont::drawText(l.rightX + 52.0f, cy + 4.0f, activeItems[i].title, 1.5f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 52.0f, cy + 4.0f, activeItems[i].title, 1.5f, isHov ? Vec3(1.0f, 0.95f, 0.70f) : textLight, LabFontType::System);
                 LabFont::drawText(l.rightX + 52.0f, cy + (isCat0 ? 22.0f : 19.0f), activeItems[i].desc, 1.3f, textDim, LabFontType::System);
             }
         }
 
         // ==================== TAB CONTENT: OUTLINER (STRUKTURA MAPY) ====================
         if (_sidebarTab == SidebarTab::Hierarchy) {
-            LabFont::drawText(l.rightX + 12.0f, l.rightY + 38.0f, "Map Entity Outliner:", 1.7f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, l.rightY + 38.0f, "Map Entity Outliner:", 1.7f, orangeGlow, LabFontType::System);
 
-            Renderer::drawRect(l.outListX, l.outListY, l.outListW, l.outListH, Vec3(1, 1, 1));
-            Renderer::drawRect(l.outListX, l.outListY, l.outListW, 1.0f, winBorder);
+            Renderer::drawRect(l.outListX, l.outListY, l.outListW, l.outListH, wellBg);
+            drawDarkBevel(l.outListX, l.outListY, l.outListW, l.outListH, true);
 
             int totalSpawns = (int)_map->spawnPoints.size();
             int totalWepSpawns = (int)_map->weaponSpawners.size();
@@ -2253,34 +2378,21 @@ public:
                 }
 
                 if (isSelected) {
-                    Renderer::drawRect(l.outListX + 2.0f, iy, l.outListW - 4.0f, l.outItemH, Vec3(0.85f, 0.92f, 1.0f));
+                    Renderer::drawRect(l.outListX + 2.0f, iy, l.outListW - 4.0f, l.outItemH, Vec3(0.20f, 0.32f, 0.48f));
                     Renderer::drawRect(l.outListX + 2.0f, iy, 4.0f, l.outItemH, orangeGlow);
                 }
 
-                LabFont::drawText(l.outListX + 10.0f, iy + 4.0f, itemText, 1.5f, isSelected ? Vec3(0.1f, 0.35f, 0.7f) : textDark, LabFontType::System);
+                LabFont::drawText(l.outListX + 10.0f, iy + 4.0f, itemText, 1.5f, isSelected ? Vec3(1, 1, 1) : textLight, LabFontType::System);
             }
 
             // Outliner action buttons
-            Renderer::drawRect(l.outFocusX, l.outFocusY, l.outFocusW, l.outFocusH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.outFocusX, l.outFocusY, l.outFocusW, 1.0f, winBorder);
-            LabFont::drawText(l.outFocusX + 14.0f, l.outFocusY + 6.0f, "Focus (F)", 1.5f, textDark, LabFontType::System);
-
-            Renderer::drawRect(l.outDupX, l.outDupY, l.outDupW, l.outDupH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.outDupX, l.outDupY, l.outDupW, 1.0f, winBorder);
-            LabFont::drawText(l.outDupX + 14.0f, l.outDupY + 6.0f, "Duplicate", 1.5f, textDark, LabFontType::System);
-
-            Renderer::drawRect(l.outDelX, l.outDelY, l.outDelW, l.outDelH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.outDelX, l.outDelY, l.outDelW, 1.0f, winBorder);
-            LabFont::drawText(l.outDelX + 18.0f, l.outDelY + 6.0f, "Delete", 1.5f, Vec3(0.7f, 0.1f, 0.1f), LabFontType::System);
+            drawDarkButton(l.outFocusX, l.outFocusY, l.outFocusW, l.outFocusH, "Focus (F)");
+            drawDarkButton(l.outDupX, l.outDupY, l.outDupW, l.outDupH, "Duplicate");
+            drawDarkButton(l.outDelX, l.outDelY, l.outDelW, l.outDelH, "Delete", false, true);
 
             // Pagination buttons
-            Renderer::drawRect(l.outPrevX, l.outPrevY, l.outPrevW, l.outPrevH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.outPrevX, l.outPrevY, l.outPrevW, 1.0f, winBorder);
-            LabFont::drawText(l.outPrevX + 45.0f, l.outPrevY + 5.0f, "< Prev Page", 1.5f, textDark, LabFontType::System);
-
-            Renderer::drawRect(l.outNextX, l.outNextY, l.outNextW, l.outNextH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.outNextX, l.outNextY, l.outNextW, 1.0f, winBorder);
-            LabFont::drawText(l.outNextX + 45.0f, l.outNextY + 5.0f, "Next Page >", 1.5f, textDark, LabFontType::System);
+            drawDarkButton(l.outPrevX, l.outPrevY, l.outPrevW, l.outPrevH, "< Prev Page");
+            drawDarkButton(l.outNextX, l.outNextY, l.outNextW, l.outNextH, "Next Page >");
         }
 
         // ==================== TAB CONTENT: PROPERTIES ====================
@@ -2294,65 +2406,48 @@ public:
                 LabFont::drawText(l.rightX + 12.0f, propY, selHeader, 1.7f, orangeGlow, LabFontType::System);
 
                 std::string wepStr = "Weapon: " + ws.getWeaponName() + " (ID: " + std::to_string(ws.weaponId) + ")";
-                LabFont::drawText(l.rightX + 12.0f, propY + 24.0f, wepStr, 1.5f, Vec3(0.15f, 0.55f, 0.35f), LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 24.0f, wepStr, 1.5f, greenAccent, LabFontType::System);
 
                 std::string posStr = "Pos: (" + std::to_string((int)ws.position.x) + ", " + std::to_string((int)ws.position.y) + ", " + std::to_string((int)ws.position.z) + ")";
-                LabFont::drawText(l.rightX + 12.0f, propY + 46.0f, posStr, 1.5f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 46.0f, posStr, 1.5f, textLight, LabFontType::System);
 
                 std::string respStr = "Respawn Timer: " + std::to_string((int)ws.respawnTime) + "s (Default: 60s)";
-                LabFont::drawText(l.rightX + 12.0f, propY + 68.0f, respStr, 1.5f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 68.0f, respStr, 1.5f, textLight, LabFontType::System);
 
                 // Weapon Selector Buttons [< Prev Weapon] [Next Weapon >]
-                LabFont::drawText(l.rightX + 12.0f, propY + 96.0f, "Cycle Spawned Weapon:", 1.6f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 96.0f, "Cycle Spawned Weapon:", 1.6f, textLight, LabFontType::System);
                 float wepBtnY = propY + 114.0f;
-                Renderer::drawRect(l.rightX + 10.0f, wepBtnY, 130.0f, 26.0f, Vec3(0.85f, 0.88f, 0.92f));
-                Renderer::drawRect(l.rightX + 10.0f, wepBtnY, 130.0f, 1.0f, winBorder);
-                LabFont::drawText(l.rightX + 18.0f, wepBtnY + 5.0f, "< Prev Weapon", 1.5f, textDark, LabFontType::System);
-
-                Renderer::drawRect(l.rightX + 150.0f, wepBtnY, 130.0f, 26.0f, Vec3(0.85f, 0.88f, 0.92f));
-                Renderer::drawRect(l.rightX + 150.0f, wepBtnY, 130.0f, 1.0f, winBorder);
-                LabFont::drawText(l.rightX + 158.0f, wepBtnY + 5.0f, "Next Weapon >", 1.5f, textDark, LabFontType::System);
+                drawDarkButton(l.rightX + 10.0f, wepBtnY, 130.0f, 26.0f, "< Prev Weapon");
+                drawDarkButton(l.rightX + 150.0f, wepBtnY, 130.0f, 26.0f, "Next Weapon >");
 
                 // Respawn Time Buttons [-15s] [60s (1 min)] [+15s]
-                LabFont::drawText(l.rightX + 12.0f, wepBtnY + 36.0f, "Set Respawn Delay Cooldown:", 1.6f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, wepBtnY + 36.0f, "Set Respawn Delay Cooldown:", 1.6f, textLight, LabFontType::System);
                 float respBtnY = wepBtnY + 54.0f;
-                Renderer::drawRect(l.rightX + 10.0f, respBtnY, 70.0f, 24.0f, Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.rightX + 10.0f, respBtnY, 70.0f, 1.0f, winBorder);
-                LabFont::drawText(l.rightX + 22.0f, respBtnY + 4.0f, "-15s", 1.5f, textDark, LabFontType::System);
+                drawDarkButton(l.rightX + 10.0f, respBtnY, 70.0f, 24.0f, "-15s");
 
                 bool isDefault60 = (std::abs(ws.respawnTime - 60.0f) < 0.1f);
-                Renderer::drawRect(l.rightX + 90.0f, respBtnY, 100.0f, 24.0f, isDefault60 ? Vec3(0.78f, 0.92f, 0.82f) : Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.rightX + 90.0f, respBtnY, 100.0f, 1.0f, isDefault60 ? Vec3(0.2f, 0.6f, 0.3f) : winBorder);
-                LabFont::drawText(l.rightX + 100.0f, respBtnY + 4.0f, "60s (1 min)", 1.5f, isDefault60 ? Vec3(0.1f, 0.45f, 0.2f) : textDark, LabFontType::System);
-
-                Renderer::drawRect(l.rightX + 200.0f, respBtnY, 70.0f, 24.0f, Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.rightX + 200.0f, respBtnY, 70.0f, 1.0f, winBorder);
-                LabFont::drawText(l.rightX + 212.0f, respBtnY + 4.0f, "+15s", 1.5f, textDark, LabFontType::System);
+                drawDarkButton(l.rightX + 90.0f, respBtnY, 100.0f, 24.0f, "60s (1 min)", isDefault60, false, isDefault60);
+                drawDarkButton(l.rightX + 200.0f, respBtnY, 70.0f, 24.0f, "+15s");
 
                 // Deselect & Delete buttons
-                Renderer::drawRect(l.deselX, l.deselY, l.deselW, l.deselH, Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.deselX, l.deselY, l.deselW, 1.0f, winBorder);
-                LabFont::drawText(l.deselX + 85.0f, l.deselY + 7.0f, "Deselect All", 1.6f, textDark, LabFontType::System);
-
-                Renderer::drawRect(l.delX, l.delY, l.delW, l.delH, Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.delX, l.delY, l.delW, 1.0f, winBorder);
-                LabFont::drawText(l.delX + 70.0f, l.delY + 7.0f, "Delete Weapon Spawner", 1.6f, Vec3(0.7f, 0.1f, 0.1f), LabFontType::System);
+                drawDarkButton(l.deselX, l.deselY, l.deselW, l.deselH, "Deselect All");
+                drawDarkButton(l.delX, l.delY, l.delW, l.delH, "Delete Weapon Spawner", false, true);
             } else if (_selectionType == SelectionType::Spawn && _selectedIndex >= 0 && _selectedIndex < (int)_map->spawnPoints.size()) {
                 auto& sp = _map->spawnPoints[_selectedIndex];
                 std::string selHeader = "Selection: " + sp.getDisplayName() + " #" + std::to_string(_selectedIndex);
                 LabFont::drawText(l.rightX + 12.0f, propY, selHeader, 1.7f, orangeGlow, LabFontType::System);
 
                 std::string classStr = "Class: " + sp.entityClass;
-                LabFont::drawText(l.rightX + 12.0f, propY + 24.0f, classStr, 1.5f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 24.0f, classStr, 1.5f, textLight, LabFontType::System);
 
                 std::string posStr = "Pos: (" + std::to_string((int)sp.position.x) + ", " + std::to_string((int)sp.position.y) + ", " + std::to_string((int)sp.position.z) + ")";
-                LabFont::drawText(l.rightX + 12.0f, propY + 46.0f, posStr, 1.5f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 46.0f, posStr, 1.5f, textLight, LabFontType::System);
 
                 std::string yawStr = "Facing Yaw: " + std::to_string((int)sp.yaw) + " deg";
-                LabFont::drawText(l.rightX + 12.0f, propY + 68.0f, yawStr, 1.5f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 68.0f, yawStr, 1.5f, textLight, LabFontType::System);
 
                 // Team Type selector buttons
-                LabFont::drawText(l.rightX + 12.0f, propY + 98.0f, "Spawn Mode & Team Allocation:", 1.6f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, propY + 98.0f, "Spawn Mode & Team Allocation:", 1.6f, textLight, LabFontType::System);
                 float typeBtnY = propY + 114.0f;
                 float btnW = 94.0f;
 
@@ -2360,35 +2455,23 @@ public:
                 bool isAlpha = (sp.type == SpawnType::TeamAlpha);
                 bool isBeta = (sp.type == SpawnType::TeamBeta);
 
-                Renderer::drawRect(l.rightX + 10.0f, typeBtnY, btnW, 26.0f, isFFA ? Vec3(0.2f, 0.75f, 0.4f) : Vec3(0.88f, 0.88f, 0.90f));
-                LabFont::drawText(l.rightX + 22.0f, typeBtnY + 5.0f, "FFA / DM", 1.5f, isFFA ? Vec3(1, 1, 1) : textDark, LabFontType::System);
-
-                Renderer::drawRect(l.rightX + 110.0f, typeBtnY, btnW, 26.0f, isAlpha ? Vec3(0.2f, 0.5f, 0.85f) : Vec3(0.88f, 0.88f, 0.90f));
-                LabFont::drawText(l.rightX + 118.0f, typeBtnY + 5.0f, "Team Alpha", 1.5f, isAlpha ? Vec3(1, 1, 1) : textDark, LabFontType::System);
-
-                Renderer::drawRect(l.rightX + 210.0f, typeBtnY, btnW, 26.0f, isBeta ? Vec3(0.85f, 0.25f, 0.25f) : Vec3(0.88f, 0.88f, 0.90f));
-                LabFont::drawText(l.rightX + 220.0f, typeBtnY + 5.0f, "Team Beta", 1.5f, isBeta ? Vec3(1, 1, 1) : textDark, LabFontType::System);
+                drawDarkButton(l.rightX + 10.0f, typeBtnY, btnW, 26.0f, "FFA / DM", isFFA, false, isFFA);
+                drawDarkButton(l.rightX + 110.0f, typeBtnY, btnW, 26.0f, "Team Alpha", isAlpha);
+                drawDarkButton(l.rightX + 210.0f, typeBtnY, btnW, 26.0f, "Team Beta", isBeta, isBeta);
 
                 // Yaw Rotate buttons
-                LabFont::drawText(l.rightX + 12.0f, typeBtnY + 38.0f, "Rotate Spawn Facing Direction:", 1.6f, textDark, LabFontType::System);
+                LabFont::drawText(l.rightX + 12.0f, typeBtnY + 38.0f, "Rotate Spawn Facing Direction:", 1.6f, textLight, LabFontType::System);
                 float yawBtnY = typeBtnY + 58.0f;
                 float yBtnW = 55.0f;
                 const char* yLabels[5] = { "-45", "0", "90", "180", "+45" };
                 for (int k = 0; k < 5; ++k) {
                     float yx = l.rightX + 10.0f + k * 58.0f;
-                    Renderer::drawRect(yx, yawBtnY, yBtnW, 24.0f, Vec3(0.88f, 0.88f, 0.90f));
-                    Renderer::drawRect(yx, yawBtnY, yBtnW, 1.0f, winBorder);
-                    LabFont::drawText(yx + 12.0f, yawBtnY + 4.0f, yLabels[k], 1.5f, textDark, LabFontType::System);
+                    drawDarkButton(yx, yawBtnY, yBtnW, 24.0f, yLabels[k]);
                 }
 
                 // Deselect & Delete buttons
-                Renderer::drawRect(l.deselX, l.deselY, l.deselW, l.deselH, Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.deselX, l.deselY, l.deselW, 1.0f, winBorder);
-                LabFont::drawText(l.deselX + 85.0f, l.deselY + 7.0f, "Deselect All", 1.6f, textDark, LabFontType::System);
-
-                Renderer::drawRect(l.delX, l.delY, l.delW, l.delH, Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(l.delX, l.delY, l.delW, 1.0f, winBorder);
-                LabFont::drawText(l.delX + 75.0f, l.delY + 7.0f, "Delete Spawn Point", 1.6f, Vec3(0.7f, 0.1f, 0.1f), LabFontType::System);
+                drawDarkButton(l.deselX, l.deselY, l.deselW, l.deselH, "Deselect All");
+                drawDarkButton(l.delX, l.delY, l.delW, l.delH, "Delete Spawn Point", false, true);
             } else {
 
             // Header info on selection
@@ -2398,7 +2481,7 @@ public:
             else if (_selectionType == SelectionType::Door) selHeader = "Selection: Door #" + std::to_string(_selectedIndex);
             else if (_selectionType == SelectionType::Spawn) selHeader = "Selection: Player Spawn";
 
-            LabFont::drawText(l.rightX + 12.0f, propY, selHeader, 1.7f, (_selectionType != SelectionType::None) ? orangeGlow : textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, propY, selHeader, 1.7f, (_selectionType != SelectionType::None) ? orangeGlow : textLight, LabFontType::System);
 
             // Coordinates & Dimensions
             Vec3 pos = _cursorPos;
@@ -2412,91 +2495,75 @@ public:
             } else if (_selectionType == SelectionType::Door && _selectedIndex >= 0 && _selectedIndex < (int)_map->doors.size()) {
                 pos = _map->doors[_selectedIndex].position;
                 dims = _map->doors[_selectedIndex].size;
-            } else if (_selectionType == SelectionType::Spawn) {
-                pos = _map->spawn.position;
+            } else if (_selectionType == SelectionType::Spawn && _selectedIndex >= 0 && _selectedIndex < (int)_map->spawnPoints.size()) {
+                pos = _map->spawnPoints[_selectedIndex].position;
+            } else if (_selectionType == SelectionType::WeaponSpawner && _selectedIndex >= 0 && _selectedIndex < (int)_map->weaponSpawners.size()) {
+                pos = _map->weaponSpawners[_selectedIndex].position;
             }
 
             std::string posStr = "Pos: (" + std::to_string((int)pos.x) + ", " + std::to_string((int)pos.y) + ", " + std::to_string((int)pos.z) + ")";
-            LabFont::drawText(l.rightX + 12.0f, propY + 22.0f, posStr, 1.6f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, propY + 22.0f, posStr, 1.6f, textLight, LabFontType::System);
 
             std::string dimStr = "Size: (" + std::to_string((int)dims.x) + " x " + std::to_string((int)dims.y) + " x " + std::to_string((int)dims.z) + ")";
-            LabFont::drawText(l.rightX + 12.0f, propY + 42.0f, dimStr, 1.6f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, propY + 42.0f, dimStr, 1.6f, textLight, LabFontType::System);
 
             // UV Scale buttons
-            LabFont::drawText(l.rightX + 12.0f, l.uvBtnY - 18.0f, "Texture UV Tiling Scale:", 1.7f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, l.uvBtnY - 18.0f, "Texture UV Tiling Scale:", 1.7f, textLight, LabFontType::System);
 
             float scales[4] = { 0.125f, 0.25f, 0.5f, 1.0f };
             const char* scaleLabels[4] = { "0.125", "0.25", "0.5", "1.0" };
             for (int i = 0; i < 4; ++i) {
                 float sx = l.rightX + 10.0f + i * 70.0f;
                 bool isCurScale = (std::abs(_activeUvScale.x - scales[i]) < 0.01f);
-                Renderer::drawRect(sx, l.uvBtnY, l.uvBtnW, l.uvBtnH, isCurScale ? Vec3(0.78f, 0.88f, 1.0f) : Vec3(0.88f, 0.88f, 0.90f));
-                Renderer::drawRect(sx, l.uvBtnY, l.uvBtnW, 1.0f, isCurScale ? cyanGlow : winBorder);
-                LabFont::drawText(sx + 14.0f, l.uvBtnY + 5.0f, scaleLabels[i], 1.5f, isCurScale ? Vec3(0.1f, 0.4f, 0.8f) : textDark, LabFontType::System);
+                drawDarkButton(sx, l.uvBtnY, l.uvBtnW, l.uvBtnH, scaleLabels[i], isCurScale);
             }
 
             // Texture Preview & Picker
-            LabFont::drawText(l.rightX + 12.0f, l.texBoxY - 18.0f, "Active Texture:", 1.7f, textDark, LabFontType::System);
-            Renderer::drawRect(l.texBoxX, l.texBoxY, l.texBoxW, l.texBoxH, Vec3(1, 1, 1));
-            Renderer::drawRect(l.texBoxX, l.texBoxY, l.texBoxW, 1.0f, winBorder);
-            LabFont::drawText(l.texBoxX + 10.0f, l.texBoxY + 4.0f, _selectedTexture, 1.6f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, l.texBoxY - 18.0f, "Active Texture:", 1.7f, textLight, LabFontType::System);
+            Renderer::drawRect(l.texBoxX, l.texBoxY, l.texBoxW, l.texBoxH, wellBg);
+            drawDarkBevel(l.texBoxX, l.texBoxY, l.texBoxW, l.texBoxH, true);
+            LabFont::drawText(l.texBoxX + 10.0f, l.texBoxY + 4.0f, _selectedTexture, 1.6f, textLight, LabFontType::System);
 
             Renderer::drawRect(l.thumbX, l.thumbY, l.thumbS, l.thumbS, Vec3(0, 0, 0));
+            drawDarkBevel(l.thumbX, l.thumbY, l.thumbS, l.thumbS, true);
             if (_textures.contains(_selectedTexture)) {
                 Renderer::drawTextureRect(l.thumbX + 2.0f, l.thumbY + 2.0f, l.thumbS - 4.0f, l.thumbS - 4.0f, *_textures[_selectedTexture]);
             }
 
-            Renderer::drawRect(l.texBrowseX, l.texBrowseY, l.texBrowseW, l.texBrowseH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.texBrowseX, l.texBrowseY, l.texBrowseW, 1.0f, winBorder);
-            LabFont::drawText(l.texBrowseX + 22.0f, l.texBrowseY + 8.0f, "Browse Textures...", 1.6f, textDark, LabFontType::System);
-
-            Renderer::drawRect(l.texApplyX, l.texApplyY, l.texApplyW, l.texApplyH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.texApplyX, l.texApplyY, l.texApplyW, 1.0f, winBorder);
-            LabFont::drawText(l.texApplyX + 28.0f, l.texApplyY + 8.0f, "Apply to Brush", 1.6f, textDark, LabFontType::System);
+            drawDarkButton(l.texBrowseX, l.texBrowseY, l.texBrowseW, l.texBrowseH, "Browse Textures...");
+            drawDarkButton(l.texApplyX, l.texApplyY, l.texApplyW, l.texApplyH, "Apply to Brush", false, false, true);
 
             // 3D Entity Prop Model Selector
-            LabFont::drawText(l.rightX + 12.0f, l.modelBoxY - 18.0f, "3D Entity Model (.stl):", 1.7f, textDark, LabFontType::System);
-            Renderer::drawRect(l.modelBoxX, l.modelBoxY, l.modelBoxW, l.modelBoxH, Vec3(1, 1, 1));
-            Renderer::drawRect(l.modelBoxX, l.modelBoxY, l.modelBoxW, 1.0f, winBorder);
-            LabFont::drawText(l.modelBoxX + 10.0f, l.modelBoxY + 4.0f, _selectedModel, 1.6f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, l.modelBoxY - 18.0f, "3D Entity Model (.stl):", 1.7f, textLight, LabFontType::System);
+            Renderer::drawRect(l.modelBoxX, l.modelBoxY, l.modelBoxW, l.modelBoxH, wellBg);
+            drawDarkBevel(l.modelBoxX, l.modelBoxY, l.modelBoxW, l.modelBoxH, true);
+            LabFont::drawText(l.modelBoxX + 10.0f, l.modelBoxY + 4.0f, _selectedModel, 1.6f, textLight, LabFontType::System);
 
-            Renderer::drawRect(l.modelBrowseX, l.modelBrowseY, l.modelBrowseW, l.modelBrowseH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.modelBrowseX, l.modelBrowseY, l.modelBrowseW, 1.0f, winBorder);
-            LabFont::drawText(l.modelBrowseX + 55.0f, l.modelBrowseY + 8.0f, "Browse 3D Models...", 1.6f, textDark, LabFontType::System);
+            drawDarkButton(l.modelBrowseX, l.modelBrowseY, l.modelBrowseW, l.modelBrowseH, "Browse 3D Models...");
 
             // Dimension Adjusters [-] [+]
-            LabFont::drawText(l.rightX + 12.0f, l.dimBtnsY - 18.0f, "Adjust Size (X / Y / Z):", 1.7f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, l.dimBtnsY - 18.0f, "Adjust Size (X / Y / Z):", 1.7f, textLight, LabFontType::System);
 
             // X
-            LabFont::drawText(l.rightX + 12.0f, l.dimBtnsY + 4.0f, "X:", 1.6f, textDark, LabFontType::System);
-            Renderer::drawRect(l.rightX + 30.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, Vec3(0.88f, 0.88f, 0.90f));
-            LabFont::drawText(l.rightX + 38.0f, l.dimBtnsY + 3.0f, "-", 1.8f, textDark, LabFontType::System);
-            Renderer::drawRect(l.rightX + 60.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, Vec3(0.88f, 0.88f, 0.90f));
-            LabFont::drawText(l.rightX + 66.0f, l.dimBtnsY + 3.0f, "+", 1.8f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 12.0f, l.dimBtnsY + 4.0f, "X:", 1.6f, textLight, LabFontType::System);
+            drawDarkButton(l.rightX + 30.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, "-");
+            drawDarkButton(l.rightX + 60.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, "+");
 
             // Y
-            LabFont::drawText(l.rightX + 105.0f, l.dimBtnsY + 4.0f, "Y:", 1.6f, textDark, LabFontType::System);
-            Renderer::drawRect(l.rightX + 123.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, Vec3(0.88f, 0.88f, 0.90f));
-            LabFont::drawText(l.rightX + 131.0f, l.dimBtnsY + 3.0f, "-", 1.8f, textDark, LabFontType::System);
-            Renderer::drawRect(l.rightX + 153.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, Vec3(0.88f, 0.88f, 0.90f));
-            LabFont::drawText(l.rightX + 159.0f, l.dimBtnsY + 3.0f, "+", 1.8f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 105.0f, l.dimBtnsY + 4.0f, "Y:", 1.6f, textLight, LabFontType::System);
+            drawDarkButton(l.rightX + 123.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, "-");
+            drawDarkButton(l.rightX + 153.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, "+");
 
             // Z
-            LabFont::drawText(l.rightX + 198.0f, l.dimBtnsY + 4.0f, "Z:", 1.6f, textDark, LabFontType::System);
-            Renderer::drawRect(l.rightX + 216.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, Vec3(0.88f, 0.88f, 0.90f));
-            LabFont::drawText(l.rightX + 224.0f, l.dimBtnsY + 3.0f, "-", 1.8f, textDark, LabFontType::System);
-            Renderer::drawRect(l.rightX + 246.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, Vec3(0.88f, 0.88f, 0.90f));
-            LabFont::drawText(l.rightX + 252.0f, l.dimBtnsY + 3.0f, "+", 1.8f, textDark, LabFontType::System);
+            LabFont::drawText(l.rightX + 198.0f, l.dimBtnsY + 4.0f, "Z:", 1.6f, textLight, LabFontType::System);
+            drawDarkButton(l.rightX + 216.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, "-");
+            drawDarkButton(l.rightX + 246.0f, l.dimBtnsY, l.dimBtnW, l.dimBtnH, "+");
 
             // Deselect button
-            Renderer::drawRect(l.deselX, l.deselY, l.deselW, l.deselH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.deselX, l.deselY, l.deselW, 1.0f, winBorder);
-            LabFont::drawText(l.deselX + 85.0f, l.deselY + 7.0f, "Deselect All", 1.6f, textDark, LabFontType::System);
+            drawDarkButton(l.deselX, l.deselY, l.deselW, l.deselH, "Deselect All");
 
             // Delete Selected button
-            Renderer::drawRect(l.delX, l.delY, l.delW, l.delH, Vec3(0.88f, 0.88f, 0.90f));
-            Renderer::drawRect(l.delX, l.delY, l.delW, 1.0f, winBorder);
-            LabFont::drawText(l.delX + 75.0f, l.delY + 7.0f, "Delete Selected", 1.6f, Vec3(0.7f, 0.1f, 0.1f), LabFontType::System);
+            drawDarkButton(l.delX, l.delY, l.delW, l.delH, "Delete Selected", false, true);
         }
     }
 
@@ -2506,17 +2573,15 @@ public:
         float conX = leftW + 20.0f;
         float conY = h - conH - 32.0f;
 
-        Renderer::drawRect(conX, conY, conW, conH, Vec3(1, 1, 1));
-        Renderer::drawRect(conX, conY, conW, 22.0f, Vec3(0.85f, 0.90f, 0.96f));
-        Renderer::drawRect(conX, conY, conW, 1.0f, winBorder);
-        Renderer::drawRect(conX, conY + conH - 1.0f, conW, 1.0f, winBorder);
-        Renderer::drawRect(conX, conY, 1.0f, conH, winBorder);
-        Renderer::drawRect(conX + conW - 1.0f, conY, 1.0f, conH, winBorder);
+        Renderer::drawRect(conX, conY, conW, conH, wellBg);
+        Renderer::drawRect(conX, conY, conW, 22.0f, Vec3(0.14f, 0.20f, 0.28f));
+        drawDarkBevel(conX, conY, conW, conH, true);
 
-        LabFont::drawText(conX + 10.0f, conY + 5.0f, "Editor Messages & Optimization Log", 1.7f, textDark, LabFontType::System);
+        LabFont::drawText(conX + 10.0f, conY + 5.0f, "Editor Messages & Optimization Log", 1.7f, cyanGlow, LabFontType::System);
 
         for (int i = 0; i < (int)_consoleMessages.size(); ++i) {
-            LabFont::drawText(conX + 12.0f, conY + 28.0f + i * 14.0f, _consoleMessages[i], 1.5f, Vec3(0.1f, 0.15f, 0.2f), LabFontType::System);
+            Vec3 msgCol = (i == (int)_consoleMessages.size() - 1) ? greenAccent : Vec3(0.78f, 0.82f, 0.88f);
+            LabFont::drawText(conX + 12.0f, conY + 28.0f + i * 14.0f, _consoleMessages[i], 1.5f, msgCol, LabFontType::System);
         }
 
         // CSG Clip Tool HUD Banner when active
@@ -2526,8 +2591,8 @@ public:
             float bx = (w - bannerW) * 0.5f;
             float by = 65.0f;
             Renderer::drawRect(bx, by, bannerW, bannerH, Vec3(0.12f, 0.14f, 0.18f));
+            drawDarkBevel(bx, by, bannerW, bannerH, false);
             Renderer::drawRect(bx, by, bannerW, 2.0f, orangeGlow);
-            Renderer::drawRect(bx, by + bannerH - 1.0f, bannerW, 1.0f, winBorder);
 
             std::string modeStr = (_clipMode == ClipMode::KeepFront) ? "KEEP FRONT (Positive Side)" :
                                   (_clipMode == ClipMode::KeepBack)  ? "KEEP BACK (Negative Side)" :
@@ -2538,13 +2603,13 @@ public:
 
         // ==================== 6. STATUS BAR ====================
         float sbY = h - 22.0f;
-        Renderer::drawRect(0, sbY, w, 22.0f, winBg);
-        Renderer::drawRect(0, sbY, w, 1.0f, winBorder);
+        Renderer::drawRect(0, sbY, w, 22.0f, panelDarker);
+        drawDarkBevel(0, sbY, w, 22.0f, false);
 
         std::string sbText = "RMB Fly | LMB Pick/Apply | E Place | X Clip | ENTER Commit | F Focus | Ctrl+D Duplicate | Del Delete | " + _cullingStats;
-        LabFont::drawText(10.0f, sbY + 5.0f, sbText, 1.5f, textDark, LabFontType::System);
+        LabFont::drawText(10.0f, sbY + 5.0f, sbText, 1.5f, textLight, LabFontType::System);
         std::string gridStr = "Snap: " + std::to_string((int)_gridSnap) + " | F9: Run";
-        LabFont::drawText(w - 240.0f, sbY + 5.0f, gridStr, 1.5f, textDark, LabFontType::System);
+        LabFont::drawText(w - 240.0f, sbY + 5.0f, gridStr, 1.5f, orangeGlow, LabFontType::System);
 
         // ==================== 7. DROPDOWN FILE MENU ====================
         if (_fileMenuOpen) {
@@ -2552,16 +2617,13 @@ public:
             float menuY = 24.0f;
             float menuW = 190.0f;
             float menuH = 125.0f;
-            Vec3 menuBg{ 0.96f, 0.96f, 0.97f };
-            Vec3 menuBorder{ 0.55f, 0.55f, 0.60f };
-            Vec3 menuShadow{ 0.2f, 0.2f, 0.2f };
+            Vec3 menuBg{ 0.16f, 0.17f, 0.20f };
+            Vec3 menuBorder{ 0.35f, 0.38f, 0.44f };
+            Vec3 menuShadow{ 0.05f, 0.05f, 0.07f };
 
-            Renderer::drawRect(menuX + 3.0f, menuY + 3.0f, menuW, menuH, menuShadow * 0.35f);
+            Renderer::drawRect(menuX + 3.0f, menuY + 3.0f, menuW, menuH, menuShadow);
             Renderer::drawRect(menuX, menuY, menuW, menuH, menuBg);
-            Renderer::drawRect(menuX, menuY, menuW, 1.0f, menuBorder);
-            Renderer::drawRect(menuX, menuY, 1.0f, menuH, menuBorder);
-            Renderer::drawRect(menuX + menuW - 1.0f, menuY, 1.0f, menuH, menuBorder);
-            Renderer::drawRect(menuX, menuY + menuH - 1.0f, menuW, 1.0f, menuBorder);
+            drawDarkBevel(menuX, menuY, menuW, menuH, false);
 
             struct MenuItem { std::string name; std::string shortcut; };
             MenuItem items[] = {
@@ -2574,8 +2636,12 @@ public:
 
             for (int i = 0; i < 5; ++i) {
                 float iy = menuY + 3.0f + i * 24.0f;
+                bool isHov = (_mouseScreenX >= menuX && _mouseScreenX <= menuX + menuW && _mouseScreenY >= iy && _mouseScreenY <= iy + 22.0f);
+                if (isHov) {
+                    Renderer::drawRect(menuX + 2.0f, iy, menuW - 4.0f, 22.0f, Vec3(0.24f, 0.28f, 0.36f));
+                }
                 if (i == 4) Renderer::drawRect(menuX + 6.0f, iy - 2.0f, menuW - 12.0f, 1.0f, menuBorder);
-                LabFont::drawText(menuX + 14.0f, iy + 4.0f, items[i].name, 1.6f, textDark, LabFontType::System);
+                LabFont::drawText(menuX + 14.0f, iy + 4.0f, items[i].name, 1.6f, isHov ? orangeGlow : textLight, LabFontType::System);
                 if (!items[i].shortcut.empty()) {
                     LabFont::drawText(menuX + menuW - 65.0f, iy + 4.0f, items[i].shortcut, 1.5f, textDim, LabFontType::System);
                 }
@@ -2594,19 +2660,20 @@ public:
 
         Renderer::beginUI((int)w, (int)h);
 
-        Renderer::drawRect(0, 0, w, h, Vec3(0.05f, 0.06f, 0.08f));
+        Renderer::drawRect(0, 0, w, h, Vec3(0.04f, 0.05f, 0.06f));
 
         float bw = 820.0f;
         float bh = 600.0f;
         float bx = (w - bw) * 0.5f;
         float by = (h - bh) * 0.5f;
 
-        Renderer::drawRect(bx, by, bw, bh, Vec3(0.92f, 0.92f, 0.94f));
-        Renderer::drawRect(bx, by, bw, 28.0f, Vec3(0.2f, 0.35f, 0.55f));
+        Renderer::drawRect(bx, by, bw, bh, Vec3(0.16f, 0.17f, 0.20f));
+        drawDarkBevel(bx, by, bw, bh, false);
+
+        Renderer::drawRect(bx + 2.0f, by + 2.0f, bw - 4.0f, 28.0f, Vec3(0.14f, 0.22f, 0.34f));
         LabFont::drawText(bx + 14.0f, by + 8.0f, "Texture Browser - Choose Surface Material", 1.8f, Vec3(1, 1, 1), LabFontType::System);
 
-        Renderer::drawRect(bx + bw - 32.0f, by + 4.0f, 24.0f, 20.0f, Vec3(0.85f, 0.25f, 0.25f));
-        LabFont::drawText(bx + bw - 25.0f, by + 7.0f, "X", 1.8f, Vec3(1, 1, 1), LabFontType::System);
+        drawDarkButton(bx + bw - 32.0f, by + 4.0f, 24.0f, 22.0f, "X", false, true);
 
         int cols = 6;
         float thumbSize = 110.0f;
@@ -2622,7 +2689,8 @@ public:
 
             bool isSelected = (_availableTextures[i].filename == _selectedTexture);
 
-            Renderer::drawRect(tx - 3.0f, ty - 3.0f, thumbSize + 6.0f, thumbSize + 22.0f, isSelected ? Vec3(1.0f, 0.55f, 0.1f) : Vec3(0.7f, 0.72f, 0.75f));
+            Renderer::drawRect(tx - 3.0f, ty - 3.0f, thumbSize + 6.0f, thumbSize + 22.0f, isSelected ? Vec3(1.0f, 0.55f, 0.10f) : Vec3(0.24f, 0.25f, 0.28f));
+            drawDarkBevel(tx - 3.0f, ty - 3.0f, thumbSize + 6.0f, thumbSize + 22.0f, isSelected);
             Renderer::drawRect(tx, ty, thumbSize, thumbSize, Vec3(0, 0, 0));
 
             if (_textures.contains(_availableTextures[i].filename)) {
@@ -2631,7 +2699,7 @@ public:
 
             std::string label = _availableTextures[i].filename;
             if (label.size() > 12) label = label.substr(0, 10) + "..";
-            LabFont::drawText(tx, ty + thumbSize + 4.0f, label, 1.4f, Vec3(0.1f, 0.1f, 0.1f), LabFontType::System);
+            LabFont::drawText(tx, ty + thumbSize + 4.0f, label, 1.4f, isSelected ? Vec3(1.0f, 0.85f, 0.2f) : Vec3(0.9f, 0.92f, 0.95f), LabFontType::System);
         }
 
         Renderer::endUI();
@@ -2646,37 +2714,37 @@ public:
 
         Renderer::beginUI((int)w, (int)h);
 
-        Renderer::drawRect(0, 0, w, h, Vec3(0.05f, 0.06f, 0.08f));
+        Renderer::drawRect(0, 0, w, h, Vec3(0.04f, 0.05f, 0.06f));
 
         float bw = 700.0f;
         float bh = 480.0f;
         float bx = (w - bw) * 0.5f;
         float by = (h - bh) * 0.5f;
 
-        Renderer::drawRect(bx, by, bw, bh, Vec3(0.92f, 0.92f, 0.94f));
-        Renderer::drawRect(bx, by, bw, 28.0f, Vec3(0.15f, 0.45f, 0.75f));
+        Renderer::drawRect(bx, by, bw, bh, Vec3(0.16f, 0.17f, 0.20f));
+        drawDarkBevel(bx, by, bw, bh, false);
+
+        Renderer::drawRect(bx + 2.0f, by + 2.0f, bw - 4.0f, 28.0f, Vec3(0.14f, 0.22f, 0.34f));
         LabFont::drawText(bx + 14.0f, by + 8.0f, "3D Model Browser - Place Entity Props", 1.8f, Vec3(1, 1, 1), LabFontType::System);
 
-        Renderer::drawRect(bx + bw - 32.0f, by + 4.0f, 24.0f, 20.0f, Vec3(0.85f, 0.25f, 0.25f));
-        LabFont::drawText(bx + bw - 25.0f, by + 7.0f, "X", 1.8f, Vec3(1, 1, 1), LabFontType::System);
+        drawDarkButton(bx + bw - 32.0f, by + 4.0f, 24.0f, 22.0f, "X", false, true);
 
         // Browse STL from disk button
-        Renderer::drawRect(bx + 20.0f, by + 45.0f, 300.0f, 34.0f, Vec3(0.2f, 0.65f, 0.4f));
-        LabFont::drawText(bx + 35.0f, by + 54.0f, "Browse Disk for 3D Model (.stl)...", 1.6f, Vec3(1, 1, 1), LabFontType::System);
+        drawDarkButton(bx + 20.0f, by + 45.0f, 300.0f, 34.0f, "Browse Disk for 3D Model (.stl)...", false, false, true);
 
         // List discovered models
         float startY = by + 95.0f;
-        LabFont::drawText(bx + 20.0f, startY, "Available Models in assets/models/:", 1.7f, Vec3(0.1f, 0.1f, 0.1f), LabFontType::System);
+        LabFont::drawText(bx + 20.0f, startY, "Available Models in assets/models/:", 1.7f, Vec3(1.0f, 0.55f, 0.10f), LabFontType::System);
 
         for (size_t i = 0; i < _availableModels.size(); ++i) {
             float iy = startY + 24.0f + i * 36.0f;
             bool isSel = (_availableModels[i] == _selectedModel);
 
-            Renderer::drawRect(bx + 20.0f, iy, bw - 40.0f, 30.0f, isSel ? Vec3(0.78f, 0.88f, 1.0f) : Vec3(1, 1, 1));
-            Renderer::drawRect(bx + 20.0f, iy, bw - 40.0f, 1.0f, isSel ? Vec3(0.2f, 0.75f, 0.95f) : Vec3(0.8f, 0.8f, 0.85f));
-            if (isSel) Renderer::drawRect(bx + 20.0f, iy, 4.0f, 30.0f, Vec3(1.0f, 0.55f, 0.1f));
+            Renderer::drawRect(bx + 20.0f, iy, bw - 40.0f, 30.0f, isSel ? Vec3(0.20f, 0.32f, 0.48f) : Vec3(0.21f, 0.22f, 0.25f));
+            drawDarkBevel(bx + 20.0f, iy, bw - 40.0f, 30.0f, isSel);
+            if (isSel) Renderer::drawRect(bx + 20.0f, iy, 4.0f, 30.0f, Vec3(1.0f, 0.55f, 0.10f));
 
-            LabFont::drawText(bx + 32.0f, iy + 7.0f, _availableModels[i], 1.6f, isSel ? Vec3(0.1f, 0.35f, 0.75f) : Vec3(0.15f, 0.15f, 0.15f), LabFontType::System);
+            LabFont::drawText(bx + 32.0f, iy + 7.0f, _availableModels[i], 1.6f, isSel ? Vec3(1, 1, 1) : Vec3(0.90f, 0.92f, 0.95f), LabFontType::System);
         }
 
         Renderer::endUI();
@@ -2691,25 +2759,26 @@ public:
 
         Renderer::beginUI((int)w, (int)h);
 
-        Renderer::drawRect(0, 0, w, h, Vec3(0.05f, 0.06f, 0.08f));
+        Renderer::drawRect(0, 0, w, h, Vec3(0.04f, 0.05f, 0.06f));
 
         float bw = 650.0f;
-        float bh = 420.0f;
+        float bh = 430.0f;
         float bx = (w - bw) * 0.5f;
         float by = (h - bh) * 0.5f;
 
-        Renderer::drawRect(bx, by, bw, bh, Vec3(0.92f, 0.92f, 0.94f));
-        Renderer::drawRect(bx, by, bw, 28.0f, Vec3(0.2f, 0.35f, 0.55f));
+        Renderer::drawRect(bx, by, bw, bh, Vec3(0.16f, 0.17f, 0.20f));
+        drawDarkBevel(bx, by, bw, bh, false);
+
+        Renderer::drawRect(bx + 2.0f, by + 2.0f, bw - 4.0f, 28.0f, Vec3(0.14f, 0.22f, 0.34f));
         LabFont::drawText(bx + 14.0f, by + 8.0f, "Lab Hammer 2026 - Keyboard & Mouse Reference", 1.8f, Vec3(1, 1, 1), LabFontType::System);
 
-        Renderer::drawRect(bx + bw - 32.0f, by + 4.0f, 24.0f, 20.0f, Vec3(0.85f, 0.25f, 0.25f));
-        LabFont::drawText(bx + bw - 25.0f, by + 7.0f, "X", 1.8f, Vec3(1, 1, 1), LabFontType::System);
+        drawDarkButton(bx + bw - 32.0f, by + 4.0f, 24.0f, 22.0f, "X", false, true);
 
         const char* helpLines[] = {
             "Hold RMB + WASD: Free-cam flying (Shift = Boost, Space = Up, Ctrl = Down)",
             "LMB Click in 3D: Raycast selection of Brushes, Props, Doors, Spawns",
             "Tool 3 (Pipette): LMB applies active texture, RMB samples clicked brush texture",
-            "E Key: Place object on grid at 3D cursor (Brush, Prop, Door, Spawn)",
+            "E Key / LMB: Place object on grid at 3D cursor (Brush, Prop, Door, Spawn)",
             "F Key: Center & Focus Camera on selected entity",
             "Ctrl + D: Duplicate selected entity offset on grid",
             "Delete / Backspace: Delete selected entity",
@@ -2719,7 +2788,7 @@ public:
         };
 
         for (int i = 0; i < 10; ++i) {
-            LabFont::drawText(bx + 25.0f, by + 45.0f + i * 34.0f, helpLines[i], 1.5f, Vec3(0.12f, 0.15f, 0.2f), LabFontType::System);
+            LabFont::drawText(bx + 25.0f, by + 45.0f + i * 34.0f, helpLines[i], 1.5f, Vec3(0.90f, 0.92f, 0.95f), LabFontType::System);
         }
 
         Renderer::endUI();
@@ -2779,6 +2848,7 @@ private:
     std::string _cullingStats = "";
 
     // Input States
+    bool _isFlyingCamera = false;
     bool _lmbPressed = false;
     bool _rmbPressed = false;
     bool _ePressed = false;
